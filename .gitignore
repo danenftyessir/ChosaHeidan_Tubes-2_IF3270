@@ -1,0 +1,27 @@
+# Data — tracking folder structure only, ignoring all file contents
+data/intel_image_classification/*
+data/flickr8k/*
+data/features/*
+data/vocab/*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+venv/
+.venv/
