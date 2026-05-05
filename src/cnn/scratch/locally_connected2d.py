@@ -266,6 +266,9 @@ class LocallyConnected2D:
         self.weights = weights.astype(np.float64)
         self.bias = bias.astype(np.float64)
         self.filters = bias.shape[1]
+        self.out_rows = None  # Caller harus set manual jika perlu
+        self.out_cols = None
+        self.C_in = None
 
     def get_grad_weights(self):
         """Kembalikan gradient bobot."""

@@ -199,7 +199,7 @@ def create_intel_batches(image_paths, labels, batch_size=32, shuffle=True,
             - batch_images: np.ndarray shape (batch_size, H, W, C)
             - batch_labels: np.ndarray shape (batch_size,) integer labels
     """
-    from ..cnn.utils.utils import image_loader
+    from ..cnn.utils.utils import load_image
 
     N = len(image_paths)
     indices = np.arange(N)
@@ -222,7 +222,7 @@ def create_intel_batches(image_paths, labels, batch_size=32, shuffle=True,
             label = labels[idx]
 
             try:
-                img = image_loader(img_path, target_size=(150, 150))
+                img = load_image(img_path, target_size=(150, 150))
 
                 if preprocess_fn:
                     img = preprocess_fn(img)
@@ -343,11 +343,11 @@ class IntelImagePreprocessor:
         Returns:
             np.ndarray: preprocessed image
         """
-        from ..cnn.utils.utils import image_loader
+        from ..cnn.utils.utils import load_image
 
         # Resize (if needed)
         if img.shape[:2] != self.target_size:
-            img = image_loader(img, target_size=self.target_size)
+            img = load_image(img, target_size=self.target_size)
 
         # Normalize
         if self.normalize:
@@ -481,7 +481,7 @@ def verify_intel_dataset(data_dir):
 if __name__ == '__main__':
     import sys
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'cnn', 'utils'))
-    from utils import image_loader
+    from utils import load_image
 
     # Contoh usage
     print("[Test] Intel Image Classification Preprocessing")

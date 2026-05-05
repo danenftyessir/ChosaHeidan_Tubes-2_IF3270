@@ -112,9 +112,9 @@ def create_numpy_generator(image_paths, labels, batch_size=32, shuffle=True,
     """
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
     try:
-        from utils import image_loader
+        from utils import load_image
     except ImportError:
-        from cnn.utils.utils import image_loader
+        from cnn.utils.utils import load_image
 
     N = len(image_paths)
     indices = np.arange(N)
@@ -135,7 +135,7 @@ def create_numpy_generator(image_paths, labels, batch_size=32, shuffle=True,
                 label = labels[idx]
 
                 try:
-                    img = image_loader(img_path, target_size=target_size)
+                    img = load_image(img_path, target_size=target_size)
                     img = img.astype(np.float32) / 255.0
                     batch_images.append(img)
                     batch_labels.append(label)
@@ -329,7 +329,7 @@ class MacroF1Callback:
 def train_with_variations(data_dir, arch_type='conv2d',
                           layer_variations=[2, 3, 4],
                           filter_variations=[32, 64, 128],
-                          kernel_variations=[(3, 3), (5, 5)],
+                          kernel_variations=[(3, 3), (5, 5), (7, 7)],
                           pooling_variations=['max', 'average'],
                           epochs=30, batch_size=32,
                           weights_dir='weights/cnn',
@@ -343,7 +343,7 @@ def train_with_variations(data_dir, arch_type='conv2d',
         arch_type (str): 'conv2d' atau 'locallyconnected'
         layer_variations (list): jumlah conv layers [2, 3, 4]
         filter_variations (list): filter base [32, 64, 128]
-        kernel_variations (list): kernel sizes [(3,3), (5,5)]
+        kernel_variations (list): kernel sizes [(3,3), (5,5), (7,7)]
         pooling_variations (list): ['max', 'average']
         epochs (int): epochs per konfigurasi
         batch_size (int): ukuran batch
@@ -467,6 +467,41 @@ def train_with_variations(data_dir, arch_type='conv2d',
                             'config': config,
                             'parameters': params,
                         }
+
+                        # Generate training history plot
+                        try:
+                            import matplotlib
+                            matplotlib.use('Agg')  # Non-interactive backend
+                            import matplotlib.pyplot as plt
+
+                            plot_dir = os.path.join(os.path.dirname(weights_dir), 'plots', arch_type)
+                            os.makedirs(plot_dir, exist_ok=True)
+
+                            history_dict = {
+                                'train_loss': [float(x) for x in history.history.get('loss', [])],
+                                'val_loss': [float(x) for x in history.history.get('val_loss', [])],
+                            }
+                            save_path = os.path.join(plot_dir, f'{config_name}_loss.png')
+                            plt.figure(figsize=(10, 6))
+                            epochs_range = range(1, len(history_dict['train_loss']) + 1)
+                            if history_dict['train_loss']:
+                                plt.plot(epochs_range, history_dict['train_loss'], 'b-o',
+                                         label='Training Loss', linewidth=2, markersize=4)
+                            if history_dict['val_loss']:
+                                plt.plot(epochs_range, history_dict['val_loss'], 'r-s',
+                                         label='Validation Loss', linewidth=2, markersize=4)
+                            plt.xlabel('Epoch', fontsize=12)
+                            plt.ylabel('Loss', fontsize=12)
+                            plt.title(f'{config_name} - Training & Validation Loss', fontsize=13)
+                            plt.legend(fontsize=11)
+                            plt.grid(True, alpha=0.3)
+                            plt.tight_layout()
+                            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+                            plt.close()
+                            if verbose:
+                                print(f"  [Plot] Training history disimpan ke: {save_path}")
+                        except Exception:
+                            pass  # Plot generation non-critical, skip if fails
 
                         if verbose:
                             print(f"\n  Best Val F1: {best_val_f1:.4f}")

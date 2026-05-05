@@ -102,7 +102,7 @@ class CNNScratch:
             return (H_out, W_out, C)
 
         elif name in ('GlobalAveragePooling2D', 'GlobalMaxPooling2D'):
-            return (1, layer.__class__.__name__)
+            return (1, 1, current_shape[2])  # (H=1, W=1, C=channels)
 
         elif name == 'Flatten':
             return (H * W * C,)
@@ -219,7 +219,21 @@ class CNNScratch:
                     layer = self.layers[scratch_layer_idx]
                     name = layer.__class__.__name__
                     if name in ('Conv2D', 'LocallyConnected2D'):
-                        layer.set_weights(kernel, bias)
+                        # Deteksi LocallyConnected2D: kernel Keras 6D, Conv2D 4D
+                        if kernel.ndim == 6:
+                            # Keras LocallyConnected2D kernel: (H_out, W_out, kH, kW, C_in, C_out)
+                            # Scratch weights: (H_out*W_out, kH*kW*C_in, C_out)
+                            H_out, W_out, kH, kW, C_in, C_out = kernel.shape
+                            # Transpose: (H,W,kH,kW,C,C) → (H,W,C,kH,kW,C) → (H*W, C*kH*kW, C)
+                            kernel_transposed = kernel.transpose(0, 1, 4, 2, 3, 5)
+                            kernel_reshaped = kernel_transposed.reshape(H_out * W_out, kH * kW * C_in, C_out)
+                            # Bias: (H_out, W_out, C_out) → (H_out*W_out, C_out)
+                            bias_reshaped = bias.reshape(H_out * W_out, C_out)
+                            layer.set_weights(kernel_reshaped, bias_reshaped)
+                            layer.padding = 'valid'  # Keras default for LocallyConnected2D
+                        else:
+                            # Conv2D kernel: (kH, kW, C_in, C_out) — compatible
+                            layer.set_weights(kernel, bias)
                         scratch_layer_idx += 1
                         break
                     elif name == 'Dense':

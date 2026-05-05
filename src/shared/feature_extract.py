@@ -10,7 +10,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'cnn', 'utils'))
-from utils import image_loader, batch_loader
+from utils import load_image, batch_loader
 
 
 # ============================================================================
@@ -81,7 +81,7 @@ def extract_features_inceptionv3(image_paths, image_dir=None, batch_size=32,
             else:
                 full_path = path
 
-            img = image_loader(full_path, target_size=(299, 299))
+            img = load_image(full_path, target_size=(299, 299))
             # InceptionV3 preprocessing: scale ke [-1, 1]
             img = img * 2.0 - 1.0
             images.append(img)
@@ -156,7 +156,7 @@ def extract_features_vgg16(image_paths, image_dir=None, batch_size=32,
             else:
                 full_path = path
 
-            img = image_loader(full_path, target_size=(224, 224))
+            img = load_image(full_path, target_size=(224, 224))
             img = img.astype(np.float32)
             images.append(img)
 
@@ -225,7 +225,7 @@ def extract_features_custom(image_paths, image_dir, cnn_model_path,
         images = []
         for path in batch_paths:
             full_path = os.path.join(image_dir, path)
-            img = image_loader(full_path, target_size=(H, W))
+            img = load_image(full_path, target_size=(H, W))
             if preprocess_fn:
                 img = preprocess_fn(img)
             images.append(img)
@@ -477,7 +477,7 @@ class FeatureExtractor:
                 else:
                     full_path = path
 
-                img = image_loader(full_path, target_size=(H, W))
+                img = load_image(full_path, target_size=(H, W))
                 img = img.astype(np.float32)
                 img = self.preprocess(img)
                 images.append(img)
