@@ -1,5 +1,7 @@
-numpy
-tensorflow
+numpy<2
+tensorflow==2.10.0
 pillow
 nltk
 evaluate
+matplotlib
+scikit-learn

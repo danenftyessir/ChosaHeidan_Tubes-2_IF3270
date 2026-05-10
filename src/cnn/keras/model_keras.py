@@ -134,7 +134,7 @@ def build_cnn_conv2d(input_shape=INPUT_SHAPE, num_classes=NUM_CLASSES,
         tuple: (model, config_dict)
     """
     from tensorflow.keras import Model
-    from tensorflow.keras.layers import Input, Flatten, Dense, Dropout
+    from tensorflow.keras.layers import Input, GlobalAveragePooling2D, Dense, Dropout
 
     # Input
     inputs = Input(shape=input_shape, name='input')
@@ -147,7 +147,7 @@ def build_cnn_conv2d(input_shape=INPUT_SHAPE, num_classes=NUM_CLASSES,
         x = _build_conv_block(x, block_filters, kernel_size, pooling_type, idx=i + 1)
 
     # Classification head
-    x = Flatten(name='flatten')(x)
+    x = GlobalAveragePooling2D(name='gap')(x)
     x = Dense(256, activation='relu', name='fc1')(x)
     x = Dropout(0.5, name='dropout')(x)
     outputs = Dense(num_classes, activation='softmax', name='output')(x)
@@ -156,7 +156,7 @@ def build_cnn_conv2d(input_shape=INPUT_SHAPE, num_classes=NUM_CLASSES,
 
     model.compile(
         optimizer=_get_optimizer(optimizer, lr),
-        loss='categorical_crossentropy',
+        loss='sparse_categorical_crossentropy',
         metrics=['accuracy']
     )
 
@@ -209,7 +209,7 @@ def build_cnn_locallyconnected(input_shape=INPUT_SHAPE, num_classes=NUM_CLASSES,
     from tensorflow.keras import Model
     from tensorflow.keras.layers import (Input, LocallyConnected2D,
                                           BatchNormalization, Activation)
-    from tensorflow.keras.layers import (Flatten, Dense, Dropout,
+    from tensorflow.keras.layers import (GlobalAveragePooling2D, Dense, Dropout,
                                           MaxPooling2D, AveragePooling2D)
 
     inputs = Input(shape=input_shape, name='input')
@@ -239,7 +239,7 @@ def build_cnn_locallyconnected(input_shape=INPUT_SHAPE, num_classes=NUM_CLASSES,
             x = AveragePooling2D(pool_size=(2, 2), name=f'{prefix}_pool')(x)
 
     # Classification head
-    x = Flatten(name='flatten')(x)
+    x = GlobalAveragePooling2D(name='gap')(x)
     x = Dense(256, activation='relu', name='fc1')(x)
     x = Dropout(0.5, name='dropout')(x)
     outputs = Dense(num_classes, activation='softmax', name='output')(x)
@@ -248,7 +248,7 @@ def build_cnn_locallyconnected(input_shape=INPUT_SHAPE, num_classes=NUM_CLASSES,
 
     model.compile(
         optimizer=_get_optimizer(optimizer, lr),
-        loss='categorical_crossentropy',
+        loss='sparse_categorical_crossentropy',
         metrics=['accuracy']
     )
 
@@ -297,7 +297,7 @@ def build_cnn_vgg_style(input_shape=INPUT_SHAPE, num_classes=NUM_CLASSES,
     from tensorflow.keras import Model
     from tensorflow.keras.layers import (Input, Conv2D, LocallyConnected2D,
                                           BatchNormalization, Activation,
-                                          Flatten, Dense, Dropout,
+                                          GlobalAveragePooling2D, Dense, Dropout,
                                           MaxPooling2D, AveragePooling2D)
 
     configs = {
@@ -340,7 +340,7 @@ def build_cnn_vgg_style(input_shape=INPUT_SHAPE, num_classes=NUM_CLASSES,
         else:
             x = AveragePooling2D(pool_size=(2, 2), name=f'pool{i + 1}')(x)
 
-    x = Flatten(name='flatten')(x)
+    x = GlobalAveragePooling2D(name='gap')(x)
     x = Dense(fc_units, activation='relu', name='fc1')(x)
     x = Dropout(0.5, name='dropout')(x)
     outputs = Dense(num_classes, activation='softmax', name='output')(x)
@@ -350,7 +350,7 @@ def build_cnn_vgg_style(input_shape=INPUT_SHAPE, num_classes=NUM_CLASSES,
 
     model.compile(
         optimizer=_get_optimizer(optimizer, lr),
-        loss='categorical_crossentropy',
+        loss='sparse_categorical_crossentropy',
         metrics=['accuracy']
     )
 
@@ -441,9 +441,9 @@ def build_all_variations(input_shape=INPUT_SHAPE, num_classes=NUM_CLASSES,
     results = {}
 
     for layer_type in layer_types:
-        for num_layers in [2, 3, 4]:
-            for base_filters in [32, 64, 128]:
-                for kernel_size in [(3, 3), (5, 5), (7, 7)]:
+        for num_layers in [2, 4]:
+            for base_filters in [32, 128]:
+                for kernel_size in [(3, 3), (5, 5)]:
                     for pooling in pooling_types:
                         model, config = build_cnn_factory(
                             arch_type=layer_type,

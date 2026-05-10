@@ -60,10 +60,11 @@ def load_intel_dataset(data_dir, split='train'):
     if split not in ['train', 'test', 'val']:
         raise ValueError(f"Split harus 'train', 'test', atau 'val'. Dapat: {split}")
 
-    folder_name = f'seg_{split}'
-    split_dir = os.path.join(data_dir, folder_name)
+    split_dir = os.path.join(data_dir, f'seg_{split}')
 
     if not os.path.exists(split_dir):
+        if split == 'val':
+            return [], []  # val dibuat dari split train di training code
         raise FileNotFoundError(f"Direktori tidak ditemukan: {split_dir}")
 
     image_paths = []

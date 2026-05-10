@@ -18,12 +18,34 @@ import sys
 
 
 # ============================================================================
+# GPU Setup — konfigurasi sebelum import TF lain agar efektif
+# ============================================================================
+
+def _setup_gpu():
+    """Deteksi GPU dan aktifkan memory growth untuk menghindari OOM."""
+    try:
+        import tensorflow as tf
+        gpus = tf.config.list_physical_devices('GPU')
+        if gpus:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            print(f"[GPU] Ditemukan {len(gpus)} GPU: {[g.name for g in gpus]}")
+        else:
+            print("[GPU] Tidak ada GPU terdeteksi — menggunakan CPU.")
+            print("      Untuk GPU di Windows, gunakan tensorflow==2.10.0 atau WSL.")
+    except Exception as e:
+        print(f"[GPU] Gagal konfigurasi GPU: {e}")
+
+_setup_gpu()
+
+
+# ============================================================================
 # Project root setup
 # ============================================================================
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.join(PROJECT_ROOT, 'src')
+# main.py ada di src/, project root satu level di atasnya
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SRC_DIR)
 
-# Add src/ to path
 sys.path.insert(0, SRC_DIR)
 sys.path.insert(0, os.path.join(SRC_DIR, 'shared'))
 
@@ -65,8 +87,8 @@ def cmd_train(args):
 
 def _train_cnn(args):
     """Train CNN on Intel Image dataset."""
-    from src.cnn.keras.train import train_single_cnn
-    from src.shared.intel_preprocess import INTEL_CLASSES
+    from cnn.keras.train import train_single_cnn, train_with_variations
+    from shared.intel_preprocess import INTEL_CLASSES
 
     data_dir = args.data_dir or _get_default_data_dir('intel')
 
@@ -75,9 +97,39 @@ def _train_cnn(args):
         print("Gunakan --data-dir untuk menentukan path dataset Intel.")
         sys.exit(1)
 
-    arch = getattr(args, 'arch', None) or 'conv2d'
     epochs = args.epochs or 30
     batch_size = args.batch_size or 32
+    weights_dir = os.path.join(PROJECT_ROOT, 'weights', 'cnn')
+    results_path = os.path.join(PROJECT_ROOT, 'results', 'cnn_variations.json')
+
+    if getattr(args, 'all_variations', False):
+        # Latih semua 16 variasi (Bagian 3)
+        print(f"\n[Train CNN] Melatih SEMUA 16 variasi hyperparameter Conv2D")
+        print(f"  Epochs: {epochs} | Batch size: {batch_size}")
+        results = train_with_variations(
+            data_dir=data_dir,
+            arch_type='conv2d',
+            layer_variations=[2, 4],
+            filter_variations=[32, 128],
+            kernel_variations=[(3, 3), (5, 5)],
+            pooling_variations=['max', 'average'],
+            epochs=epochs,
+            batch_size=batch_size,
+            weights_dir=weights_dir,
+            results_path=results_path,
+            verbose=True,
+        )
+        ranked = sorted(
+            [(k, v) for k, v in results.items() if 'best_val_f1' in v],
+            key=lambda x: x[1]['best_val_f1'], reverse=True
+        )
+        print("\n[Ranking] Top 5 berdasarkan Val Macro F1:")
+        for i, (name, res) in enumerate(ranked[:5], 1):
+            print(f"  {i}. {name}: F1={res['best_val_f1']:.4f}")
+        return results
+
+    # Latih satu konfigurasi
+    arch = getattr(args, 'arch', None) or 'conv2d'
     num_conv = args.num_conv_layers or 3
     num_filters = args.num_filters or 64
     kernel_size = tuple(args.kernel_size) if args.kernel_size else (3, 3)
@@ -96,9 +148,10 @@ def _train_cnn(args):
         pooling_type=pooling,
         epochs=epochs,
         batch_size=batch_size,
+        weights_dir=weights_dir,
         verbose=1
     )
-    print(f"\n[Train CNN] Selesai! Model: {config.get('name', 'unknown')}")
+    print(f"\n[Train CNN] Selesai!")
     return model, history
 
 
@@ -241,12 +294,12 @@ def cmd_evaluate(args):
 
 def _evaluate_cnn(args):
     """Evaluate CNN on Intel Image dataset."""
-    from src.cnn.keras.evaluate import (
+    from cnn.keras.evaluate import (
         evaluate_from_weights, evaluate_cnn_keras,
         load_model_weights
     )
-    from src.cnn.keras.model_keras import build_cnn_conv2d, build_cnn_locallyconnected
-    from src.shared.intel_preprocess import INTEL_CLASSES
+    from cnn.keras.model_keras import build_cnn_conv2d, build_cnn_locallyconnected
+    from shared.intel_preprocess import INTEL_CLASSES
 
     data_dir = args.data_dir or _get_default_data_dir('intel')
     weights_path = args.weights
@@ -346,9 +399,9 @@ def cmd_demo(args):
 
 def _demo_intel(args):
     """Demo: classify an image with the trained CNN."""
-    from src.cnn.keras.evaluate import load_model_weights
-    from src.cnn.keras.model_keras import build_cnn_conv2d
-    from src.shared.intel_preprocess import INTEL_CLASSES
+    from cnn.keras.evaluate import load_model_weights
+    from cnn.keras.model_keras import build_cnn_conv2d
+    from shared.intel_preprocess import INTEL_CLASSES
     import matplotlib.image as mpimg
 
     weights_path = args.weights or _find_latest_weights('cnn')
@@ -367,9 +420,7 @@ def _demo_intel(args):
     model = load_model_weights(model, weights_path)
     model.compile(optimizer='adam', loss='categorical_crossentropy')
 
-    # Preprocess image
-    from src.shared.preprocessing import preprocess_image
-    img = preprocess_image(image_path, target_size=(150, 150))
+    img = load_image(image_path, target_size=(150, 150))
 
     # Predict
     probs = model.predict(img[np.newaxis, ...], verbose=0)[0]
@@ -478,9 +529,9 @@ def cmd_benchmark(args):
 
 def _benchmark_cnn(args):
     """Benchmark CNN inference speed."""
-    from src.cnn.keras.evaluate import benchmark_inference_speed
-    from src.cnn.keras.model_keras import build_cnn_conv2d
-    from src.shared.intel_preprocess import IntelImagePreprocessor
+    from cnn.keras.evaluate import benchmark_inference_speed
+    from cnn.keras.model_keras import build_cnn_conv2d
+    from shared.intel_preprocess import IntelImagePreprocessor
 
     data_dir = args.data_dir or _get_default_data_dir('intel')
     weights_path = args.weights or _find_latest_weights('cnn')
@@ -495,7 +546,7 @@ def _benchmark_cnn(args):
     model, _ = build_cnn_conv2d(num_classes=6)
 
     if weights_path and os.path.exists(weights_path):
-        from src.cnn.keras.evaluate import load_model_weights
+        from cnn.keras.evaluate import load_model_weights
         print(f"[Benchmark CNN] Memuat bobot: {weights_path}")
         model = load_model_weights(model, weights_path)
 
@@ -558,15 +609,14 @@ def _benchmark_caption(args):
 def _get_default_data_dir(dataset):
     """Get default data directory based on dataset type."""
     if dataset == 'intel':
-        # Try common paths
         for path in [
+            os.path.join(PROJECT_ROOT, 'data', 'intel_image_classification'),
             os.path.join(PROJECT_ROOT, 'data', 'intel'),
             os.path.join(PROJECT_ROOT, 'data', 'Intel-Images'),
-            os.path.join(PROJECT_ROOT, 'data', 'seg_train'),
         ]:
             if os.path.exists(path):
                 return path
-        return os.path.join(PROJECT_ROOT, 'data', 'intel')
+        return os.path.join(PROJECT_ROOT, 'data', 'intel_image_classification')
 
     elif dataset == 'flickr8k':
         for path in [
@@ -619,6 +669,8 @@ def _build_train_parser(sub):
                      help='Learning rate (untuk RNN/LSTM)')
 
     # CNN-specific
+    sub.add_argument('--all-variations', action='store_true',
+                     help='Latih semua 16 variasi hyperparameter Conv2D (Bagian 3)')
     sub.add_argument('--arch',
                      choices=['conv2d', 'locallyconnected'],
                      help='Arsitektur CNN (untuk dataset intel)')

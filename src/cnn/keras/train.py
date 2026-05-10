@@ -10,6 +10,11 @@ import sys
 import time
 import json
 import numpy as np
+from tensorflow.keras.callbacks import Callback as KerasCallback
+
+# Setup path agar shared/ bisa diimport
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
+from intel_preprocess import IntelImagePreprocessor
 
 
 # ============================================================================
@@ -257,24 +262,15 @@ def get_callbacks(model_name, weights_dir='weights/cnn',
 # Macro F1 Callback
 # ============================================================================
 
-class MacroF1Callback:
+class MacroF1Callback(KerasCallback):
     """
     Keras Callback untuk menghitung macro F1-score per epoch pada validation set.
-
     Menambahkan metrik 'val_f1' ke history setelah setiap epoch.
-    Compatible dengan generator-based training.
     """
 
     def __init__(self, val_data=None, batch_size=32, num_classes=6,
                  monitor='val_f1', steps=None):
-        """
-        Args:
-            val_data: tuple (image_paths, labels) atau None
-            batch_size (int): ukuran batch untuk evaluasi
-            num_classes (int): jumlah kelas
-            monitor (str): nama metrik di history
-            steps (int): jumlah steps per evaluasi
-        """
+        super().__init__()
         self.val_data = val_data
         self.batch_size = batch_size
         self.num_classes = num_classes
@@ -284,42 +280,41 @@ class MacroF1Callback:
     def on_epoch_end(self, epoch, logs=None):
         logs = logs or {}
 
-        if self.val_data is not None:
-            val_paths, val_labels = self.val_data
+        if self.val_data is None or self.model is None:
+            return
 
-            try:
-                val_gen = create_numpy_generator(
-                    val_paths, val_labels,
-                    batch_size=self.batch_size,
-                    shuffle=False
+        val_paths, val_labels = self.val_data
+        if not val_paths:
+            return
+
+        try:
+            val_gen = create_numpy_generator(
+                val_paths, val_labels,
+                batch_size=self.batch_size,
+                shuffle=False
+            )
+
+            all_preds = []
+            all_true = []
+            max_steps = self.steps or max(1, len(val_paths) // self.batch_size)
+
+            for step, (X_batch, y_batch) in enumerate(val_gen):
+                if step >= max_steps:
+                    break
+                preds = self.model.predict(X_batch, verbose=0)
+                all_preds.extend(np.argmax(preds, axis=1))
+                all_true.extend(y_batch)
+
+            if all_preds:
+                f1 = macro_f1_score(
+                    np.array(all_true),
+                    np.array(all_preds),
+                    num_classes=self.num_classes
                 )
-
-                all_preds = []
-                all_true = []
-
-                max_steps = self.steps or (len(val_paths) // self.batch_size)
-
-                for step, (X_batch, y_batch) in enumerate(val_gen):
-                    if step >= max_steps:
-                        break
-                    preds = self._model.predict(X_batch, verbose=0)
-                    all_preds.extend(np.argmax(preds, axis=1))
-                    all_true.extend(y_batch)
-
-                if all_preds:
-                    f1 = macro_f1_score(
-                        np.array(all_true),
-                        np.array(all_preds),
-                        num_classes=self.num_classes
-                    )
-                    logs[self.monitor] = float(f1)
-                    print(f" - {self.monitor}: {f1:.4f}")
-            except Exception:
-                pass
-
-    def set_model(self, model):
-        """Set model reference (dipanggil oleh Keras)."""
-        self._model = model
+                logs[self.monitor] = float(f1)
+                print(f" - {self.monitor}: {f1:.4f}")
+        except Exception:
+            pass
 
 
 # ============================================================================
@@ -327,9 +322,9 @@ class MacroF1Callback:
 # ============================================================================
 
 def train_with_variations(data_dir, arch_type='conv2d',
-                          layer_variations=[2, 3, 4],
-                          filter_variations=[32, 64, 128],
-                          kernel_variations=[(3, 3), (5, 5), (7, 7)],
+                          layer_variations=[2, 4],
+                          filter_variations=[32, 128],
+                          kernel_variations=[(3, 3), (5, 5)],
                           pooling_variations=['max', 'average'],
                           epochs=30, batch_size=32,
                           weights_dir='weights/cnn',
@@ -369,6 +364,16 @@ def train_with_variations(data_dir, arch_type='conv2d',
     train_labels = preprocessor.train_labels
     val_paths = preprocessor.val_paths
     val_labels = preprocessor.val_labels
+
+    # Jika val kosong, buat split 20% dari train
+    if len(val_paths) == 0:
+        print("  [Warning] Val set kosong — membuat split 20% dari train")
+        indices = np.random.permutation(len(train_paths))
+        split = int(len(train_paths) * 0.8)
+        val_paths = [train_paths[i] for i in indices[split:]]
+        val_labels = [train_labels[i] for i in indices[split:]]
+        train_paths = [train_paths[i] for i in indices[:split]]
+        train_labels = [train_labels[i] for i in indices[:split]]
 
     print(f"  Train: {len(train_paths)} gambar")
     print(f"  Val:   {len(val_paths)} gambar")
@@ -425,7 +430,6 @@ def train_with_variations(data_dir, arch_type='conv2d',
                         num_classes=6,
                         steps=len(val_paths) // batch_size
                     )
-                    f1_cb.set_model(model)
                     callbacks.append(f1_cb)
 
                     # Data generators
@@ -615,7 +619,6 @@ def train_single_cnn(data_dir, arch_type='conv2d',
         num_classes=6,
         steps=val_steps
     )
-    f1_cb.set_model(model)
     callbacks.append(f1_cb)
 
     # Train
