@@ -200,7 +200,10 @@ def create_intel_batches(image_paths, labels, batch_size=32, shuffle=True,
             - batch_images: np.ndarray shape (batch_size, H, W, C)
             - batch_labels: np.ndarray shape (batch_size,) integer labels
     """
-    from ..cnn.utils.utils import load_image
+    try:
+        from ..cnn.utils.utils import load_image
+    except ImportError:
+        from cnn.utils.utils import load_image
 
     N = len(image_paths)
     indices = np.arange(N)
@@ -344,7 +347,10 @@ class IntelImagePreprocessor:
         Returns:
             np.ndarray: preprocessed image
         """
-        from ..cnn.utils.utils import load_image
+        try:
+            from ..cnn.utils.utils import load_image
+        except ImportError:
+            from cnn.utils.utils import load_image
 
         # Resize (if needed)
         if img.shape[:2] != self.target_size:

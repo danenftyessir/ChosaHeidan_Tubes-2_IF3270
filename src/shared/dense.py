@@ -7,7 +7,10 @@ Mendukung pemrosesan batch.
 
 import numpy as np
 
-from .activations import get_activation
+try:
+    from .activations import get_activation
+except ImportError:
+    from activations import get_activation
 
 
 class Dense:
