@@ -477,55 +477,56 @@ def train_with_variations(data_dir, arch_type='conv2d',
                         print(f"{'=' * 60}")
 
                     start_time = time.time()
-
-                    # Build model
-                    model, config = build_cnn_factory(
-                        arch_type=arch_type,
-                        num_conv_layers=num_layers,
-                        num_filters=base_filters,
-                        kernel_size=kernel_size,
-                        pooling_type=pooling,
-                        num_classes=6
-                    )
-
-                    params = count_parameters(model)
-                    if verbose:
-                        print(f"  Parameters: {params['total']:,}")
-
-                    # MacroF1Callback HARUS pertama agar val_f1 tersedia
-                    # untuk EarlyStopping & ModelCheckpoint
-                    f1_cb = MacroF1Callback(
-                        val_data=(val_paths, val_labels),
-                        batch_size=batch_size,
-                        num_classes=6,
-                        steps=len(val_paths) // batch_size
-                    )
-                    progress_cb = DetailedProgressCallback(
-                        total_epochs=epochs,
-                        model_name=config_name,
-                        model_idx=config_idx,
-                        total_models=total_configs
-                    )
-                    # Urutan: F1 → EarlyStopping/Checkpoint/ReduceLR → Progress
-                    callbacks = [f1_cb] + get_callbacks(
-                        config_name, weights_dir=weights_dir,
-                        monitor='val_f1', patience=5
-                    ) + [progress_cb]
-
-                    # Data generators
-                    train_gen = create_numpy_generator(
-                        train_paths, train_labels,
-                        batch_size=batch_size, shuffle=True
-                    )
-                    val_gen = create_numpy_generator(
-                        val_paths, val_labels,
-                        batch_size=batch_size, shuffle=False
-                    )
-
-                    steps_per_epoch = max(1, len(train_paths) // batch_size)
-                    val_steps = max(1, len(val_paths) // batch_size)
+                    config = {}
 
                     try:
+                        # Build model (bisa OOM di sini untuk LocallyConnected besar)
+                        model, config = build_cnn_factory(
+                            arch_type=arch_type,
+                            num_conv_layers=num_layers,
+                            num_filters=base_filters,
+                            kernel_size=kernel_size,
+                            pooling_type=pooling,
+                            num_classes=6
+                        )
+
+                        params = count_parameters(model)
+                        if verbose:
+                            print(f"  Parameters: {params['total']:,}")
+
+                        # MacroF1Callback HARUS pertama agar val_f1 tersedia
+                        # untuk EarlyStopping & ModelCheckpoint
+                        f1_cb = MacroF1Callback(
+                            val_data=(val_paths, val_labels),
+                            batch_size=batch_size,
+                            num_classes=6,
+                            steps=len(val_paths) // batch_size
+                        )
+                        progress_cb = DetailedProgressCallback(
+                            total_epochs=epochs,
+                            model_name=config_name,
+                            model_idx=config_idx,
+                            total_models=total_configs
+                        )
+                        # Urutan: F1 → EarlyStopping/Checkpoint/ReduceLR → Progress
+                        callbacks = [f1_cb] + get_callbacks(
+                            config_name, weights_dir=weights_dir,
+                            monitor='val_f1', patience=5
+                        ) + [progress_cb]
+
+                        # Data generators
+                        train_gen = create_numpy_generator(
+                            train_paths, train_labels,
+                            batch_size=batch_size, shuffle=True
+                        )
+                        val_gen = create_numpy_generator(
+                            val_paths, val_labels,
+                            batch_size=batch_size, shuffle=False
+                        )
+
+                        steps_per_epoch = max(1, len(train_paths) // batch_size)
+                        val_steps = max(1, len(val_paths) // batch_size)
+
                         history = train_cnn(
                             model, train_gen, val_gen,
                             epochs=epochs,
@@ -593,9 +594,13 @@ def train_with_variations(data_dir, arch_type='conv2d',
                             print(f"  Training Time: {elapsed:.1f}s")
 
                     except Exception as e:
-                        print(f"  [ERROR] Training gagal: {e}")
+                        import gc
+                        import tensorflow as _tf_gc
+                        _tf_gc.keras.backend.clear_session()
+                        gc.collect()
+                        print(f"  [ERROR] Build/Training gagal (skip): {type(e).__name__}: {e}")
                         results[config_name] = {
-                            'error': str(e),
+                            'error': f"{type(e).__name__}: {e}",
                             'config': config,
                         }
 
