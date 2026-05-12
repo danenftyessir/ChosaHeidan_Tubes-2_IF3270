@@ -209,7 +209,7 @@ def train_cnn(model, train_gen, val_gen=None, epochs=30, batch_size=32,
 # ============================================================================
 
 def get_callbacks(model_name, weights_dir='weights/cnn',
-                  monitor='val_f1', patience=7):
+                  monitor='val_f1', patience=5):
     """
     Dapatkan list Keras callbacks.
 
@@ -312,9 +312,84 @@ class MacroF1Callback(KerasCallback):
                     num_classes=self.num_classes
                 )
                 logs[self.monitor] = float(f1)
-                print(f" - {self.monitor}: {f1:.4f}")
         except Exception:
             pass
+
+
+# ============================================================================
+# Detailed Progress Callback
+# ============================================================================
+
+class DetailedProgressCallback(KerasCallback):
+    """
+    Cetak baris per-epoch: loss, acc, val_loss, val_acc, val_f1, LR, waktu, ETA.
+    Harus ditaruh TERAKHIR dalam callbacks list agar semua log sudah terisi.
+    """
+
+    def __init__(self, total_epochs, model_name='', model_idx=1, total_models=1):
+        super().__init__()
+        self.total_epochs  = total_epochs
+        self.model_name    = model_name
+        self.model_idx     = model_idx
+        self.total_models  = total_models
+        self._epoch_start  = None
+        self._train_start  = None
+        self.epoch_times   = []
+        self.best_val_f1   = -1.0
+        self.best_epoch    = 0
+
+    def on_train_begin(self, logs=None):
+        self._train_start = time.time()
+        print(f'\n  [{self.model_idx}/{self.total_models}] {self.model_name}')
+        print(f'  {"Ep":>4} | {"loss":>7} | {"acc":>7} | {"val_loss":>8} | '
+              f'{"val_acc":>7} | {"val_f1":>7} | {"lr":>9} | {"t":>5} | ETA')
+        print(f'  {"-"*82}')
+
+    def on_epoch_begin(self, epoch, logs=None):
+        self._epoch_start = time.time()
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs   = logs or {}
+        elapsed = time.time() - self._epoch_start
+        self.epoch_times.append(elapsed)
+
+        loss   = logs.get('loss',         float('nan'))
+        acc    = logs.get('accuracy',     float('nan'))
+        v_loss = logs.get('val_loss',     float('nan'))
+        v_acc  = logs.get('val_accuracy', float('nan'))
+        v_f1   = logs.get('val_f1',       float('nan'))
+
+        try:
+            lr = float(self.model.optimizer.learning_rate)
+        except Exception:
+            lr = float('nan')
+
+        avg_t   = np.mean(self.epoch_times)
+        remain  = self.total_epochs - (epoch + 1)
+        eta_sec = avg_t * remain
+        eta_str = f'{int(eta_sec // 60)}m{int(eta_sec % 60):02d}s'
+
+        mark = ''
+        if not np.isnan(v_f1) and v_f1 > self.best_val_f1:
+            self.best_val_f1 = v_f1
+            self.best_epoch  = epoch + 1
+            mark = ' ★'
+
+        stop_str = ' [STOP]' if getattr(self.model, 'stop_training', False) else ''
+
+        print(
+            f'  {epoch+1:4d} | {loss:7.4f} | {acc:7.4f} | {v_loss:8.4f} | '
+            f'{v_acc:7.4f} | {v_f1:7.4f} | {lr:9.6f} | {elapsed:4.1f}s | '
+            f'~{eta_str}{mark}{stop_str}'
+        )
+
+    def on_train_end(self, logs=None):
+        total_t   = time.time() - self._train_start
+        epochs_run = len(self.epoch_times)
+        print(f'  {"-"*82}')
+        print(f'  Selesai {epochs_run}/{self.total_epochs} epoch | '
+              f'{int(total_t // 60)}m {int(total_t % 60):02d}s | '
+              f'Best val_f1: {self.best_val_f1:.4f} (epoch {self.best_epoch})\n')
 
 
 # ============================================================================
@@ -417,20 +492,25 @@ def train_with_variations(data_dir, arch_type='conv2d',
                     if verbose:
                         print(f"  Parameters: {params['total']:,}")
 
-                    # Callbacks
-                    callbacks = get_callbacks(
-                        config_name, weights_dir=weights_dir,
-                        monitor='val_f1', patience=7
-                    )
-
-                    # F1 Callback
+                    # MacroF1Callback HARUS pertama agar val_f1 tersedia
+                    # untuk EarlyStopping & ModelCheckpoint
                     f1_cb = MacroF1Callback(
                         val_data=(val_paths, val_labels),
                         batch_size=batch_size,
                         num_classes=6,
                         steps=len(val_paths) // batch_size
                     )
-                    callbacks.append(f1_cb)
+                    progress_cb = DetailedProgressCallback(
+                        total_epochs=epochs,
+                        model_name=config_name,
+                        model_idx=config_idx,
+                        total_models=total_configs
+                    )
+                    # Urutan: F1 → EarlyStopping/Checkpoint/ReduceLR → Progress
+                    callbacks = [f1_cb] + get_callbacks(
+                        config_name, weights_dir=weights_dir,
+                        monitor='val_f1', patience=5
+                    ) + [progress_cb]
 
                     # Data generators
                     train_gen = create_numpy_generator(
@@ -453,7 +533,7 @@ def train_with_variations(data_dir, arch_type='conv2d',
                             callbacks=callbacks,
                             steps_per_epoch=steps_per_epoch,
                             val_steps=val_steps,
-                            verbose=2
+                            verbose=0
                         )
 
                         elapsed = time.time() - start_time
@@ -607,19 +687,20 @@ def train_single_cnn(data_dir, arch_type='conv2d',
     steps_per_epoch = max(1, len(preprocessor.train_paths) // batch_size)
     val_steps = max(1, len(preprocessor.val_paths) // batch_size)
 
-    # Callbacks
-    callbacks = get_callbacks(
-        model_name, weights_dir=weights_dir,
-        monitor='val_f1', patience=7
-    )
-
+    # MacroF1Callback pertama, DetailedProgress terakhir
     f1_cb = MacroF1Callback(
         val_data=(preprocessor.val_paths, preprocessor.val_labels),
         batch_size=batch_size,
         num_classes=6,
         steps=val_steps
     )
-    callbacks.append(f1_cb)
+    progress_cb = DetailedProgressCallback(
+        total_epochs=epochs, model_name=model_name
+    )
+    callbacks = [f1_cb] + get_callbacks(
+        model_name, weights_dir=weights_dir,
+        monitor='val_f1', patience=5
+    ) + [progress_cb]
 
     # Train
     print(f"[Train] Mulai training: epochs={epochs}, batch_size={batch_size}")

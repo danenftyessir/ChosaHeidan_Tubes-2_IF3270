@@ -1,1 +1,0 @@
-# pondasi aja
