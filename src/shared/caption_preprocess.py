@@ -68,7 +68,9 @@ def tokenize_caption(caption):
 def split_captions_file(captions_path):
     """
     Parsing file captions.txt Flickr8k.
-    Format tiap baris: image_name#0\tcaption_text
+    Mendukung dua format:
+      - Tab format  : image_name#0\\tcaption_text  (Flickr8k asli)
+      - CSV format  : image,caption  dengan header  (Kaggle)
 
     Args:
         captions_path (str): path ke file captions.txt.
@@ -76,28 +78,50 @@ def split_captions_file(captions_path):
         dict: {image_id: [caption_0, caption_1, ..., caption_4]}.
     """
     captions_dict = {}
+
     with open(captions_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
+        lines = [l.strip() for l in f if l.strip()]
+
+    if not lines:
+        return captions_dict
+
+    # Deteksi format: tab-separated vs CSV
+    has_tab = any('\t' in l for l in lines[:20])
+
+    if has_tab:
+        # Format: filename.jpg#num\tcaption
+        for line in lines:
             parts = line.split('\t')
             if len(parts) != 2:
                 continue
-            img_caption = parts[0]
-            caption_text = parts[1]
-
-            # Parse: filename#0 → (filename, caption_num)
             try:
-                img_name, cap_num = img_caption.rsplit('#', 1)
+                img_name, cap_num = parts[0].rsplit('#', 1)
                 cap_num = int(cap_num)
             except ValueError:
                 continue
-
             if img_name not in captions_dict:
                 captions_dict[img_name] = [''] * 5
-
-            captions_dict[img_name][cap_num] = caption_text
+            if 0 <= cap_num < 5:
+                captions_dict[img_name][cap_num] = parts[1]
+    else:
+        # Format CSV: image,caption  (Kaggle — mungkin ada header)
+        start = 1 if lines[0].lower().startswith('image') else 0
+        for line in lines[start:]:
+            try:
+                sep = line.index(',')
+            except ValueError:
+                continue
+            img_name = line[:sep].strip()
+            caption_text = line[sep + 1:].strip()
+            if not img_name or not caption_text:
+                continue
+            if img_name not in captions_dict:
+                captions_dict[img_name] = []
+            captions_dict[img_name].append(caption_text)
+        # Normalisasi ke list 5 elemen
+        for k in captions_dict:
+            caps = captions_dict[k][:5]
+            captions_dict[k] = caps + [''] * (5 - len(caps))
 
     return captions_dict
 
