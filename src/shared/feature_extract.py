@@ -96,6 +96,11 @@ def extract_features_inceptionv3(image_paths, image_dir=None, batch_size=32,
             print(f"  Batch {batch_idx + 1}/{num_batches} selesai "
                   f"({end}/{N} gambar)")
 
+    if not all_features:
+        raise ValueError(
+            f"Tidak ada gambar yang berhasil diproses (input: {N} gambar). "
+            "Pastikan image_dir benar dan gambar dapat dibaca."
+        )
     result = np.concatenate(all_features, axis=0)
     if verbose:
         print(f"[Feature Extraction] Selesai. Shape: {result.shape}")
@@ -171,6 +176,11 @@ def extract_features_vgg16(image_paths, image_dir=None, batch_size=32,
         if verbose and (batch_idx + 1) % 10 == 0:
             print(f"  Batch {batch_idx + 1}/{num_batches} selesai")
 
+    if not all_features:
+        raise ValueError(
+            f"Tidak ada gambar yang berhasil diproses (input: {N} gambar). "
+            "Pastikan image_dir benar dan gambar dapat dibaca."
+        )
     result = np.concatenate(all_features, axis=0)
     if verbose:
         print(f"[Feature Extraction] Selesai. Shape: {result.shape}")
@@ -489,6 +499,11 @@ class FeatureExtractor:
             if verbose and (batch_idx + 1) % 20 == 0:
                 print(f"  Batch {batch_idx + 1}/{num_batches} selesai")
 
+        if not all_features:
+            raise ValueError(
+                f"Tidak ada gambar yang berhasil diproses (input: {N} gambar). "
+                "Pastikan image_dir benar dan gambar dapat dibaca."
+            )
         result = np.concatenate(all_features, axis=0)
         if verbose:
             print(f"[FeatureExtractor] Selesai. Shape: {result.shape}")
