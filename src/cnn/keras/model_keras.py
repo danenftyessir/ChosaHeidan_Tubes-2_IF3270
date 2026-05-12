@@ -238,11 +238,11 @@ def build_cnn_locallyconnected(input_shape=INPUT_SHAPE, num_classes=NUM_CLASSES,
                 self._W_out = math.ceil(W / sW)
             n_pos = self._H_out * self._W_out
             self._lc_kernel = self.add_weight(
-                'kernel', shape=(n_pos, kH * kW * C_in, self.filters),
+                name='kernel', shape=(n_pos, kH * kW * C_in, self.filters),
                 initializer='glorot_uniform')
             if self._lc_use_bias:
                 self._lc_bias_w = self.add_weight(
-                    'bias', shape=(n_pos, self.filters), initializer='zeros')
+                    name='bias', shape=(n_pos, self.filters), initializer='zeros')
             super().build(input_shape)
 
         def call(self, x):
