@@ -52,7 +52,7 @@ def build_lstm_decoder_preinject(vocab_size, embed_dim=256, hidden_dim=512,
         import tensorflow as tf
         from tensorflow.keras import Model, Input
         from tensorflow.keras.layers import (
-            Embedding, Dense, Concatenate, LSTM, Dropout
+            Embedding, Dense, Concatenate, LSTM, Dropout, Reshape
         )
     except ImportError:
         raise ImportError("TensorFlow diperlukan untuk Keras LSTM model")
@@ -74,7 +74,7 @@ def build_lstm_decoder_preinject(vocab_size, embed_dim=256, hidden_dim=512,
     )(caption_input)
 
     # Step 3: Prepend x_{-1} ke sequence embedding
-    x_start_expanded = tf.expand_dims(x_start, axis=1)
+    x_start_expanded = Reshape((1, embed_dim), name='cnn_expand')(x_start)
     combined = Concatenate(axis=1)([x_start_expanded, embeddings])
     # combined shape: (batch, seq_len + 1, embed_dim)
 
@@ -297,7 +297,7 @@ def build_lstm_decoder_bidirectional(vocab_size, embed_dim=256, hidden_dim=256,
         import tensorflow as tf
         from tensorflow.keras import Model, Input
         from tensorflow.keras.layers import (
-            Embedding, Dense, Concatenate, LSTM, Dropout, Bidirectional
+            Embedding, Dense, Concatenate, LSTM, Dropout, Bidirectional, Reshape
         )
     except ImportError:
         raise ImportError("TensorFlow diperlukan")
@@ -306,7 +306,7 @@ def build_lstm_decoder_bidirectional(vocab_size, embed_dim=256, hidden_dim=256,
     caption_input = Input(shape=(seq_max_length,), name='caption_tokens')
 
     x_start = Dense(embed_dim, activation='linear', name='cnn_projection')(cnn_input)
-    x_start_expanded = tf.expand_dims(x_start, axis=1)
+    x_start_expanded = Reshape((1, embed_dim), name='cnn_expand')(x_start)
 
     embeddings = Embedding(
         input_dim=vocab_size,

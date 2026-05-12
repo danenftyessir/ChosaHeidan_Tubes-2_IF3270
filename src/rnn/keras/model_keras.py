@@ -54,7 +54,7 @@ def build_rnn_decoder_preinject(vocab_size, embed_dim=256, hidden_dim=512,
         from tensorflow.keras import Model, Input
         from tensorflow.keras.layers import (
             Embedding, Dense, Concatenate, SimpleRNN,
-            Dropout, LSTM, Bidirectional
+            Dropout, LSTM, Bidirectional, Reshape
         )
     except ImportError:
         raise ImportError("TensorFlow diperlukan untuk Keras RNN model")
@@ -80,7 +80,7 @@ def build_rnn_decoder_preinject(vocab_size, embed_dim=256, hidden_dim=512,
     # Step 3: Prepend x_{-1} ke sequence embedding
     # embeddings[:, 0, :] = emb(<start>)
     # combined = [x_{-1}; emb(<start>); emb(S_0); ...]
-    x_start_expanded = tf.expand_dims(x_start, axis=1)  # (batch, 1, embed_dim)
+    x_start_expanded = Reshape((1, embed_dim), name='cnn_expand')(x_start)  # (batch, 1, embed_dim)
     combined = Concatenate(axis=1)([x_start_expanded, embeddings])
     # combined shape: (batch, seq_len + 1, embed_dim)
 
@@ -312,7 +312,7 @@ def build_rnn_decoder_bidirectional(vocab_size, embed_dim=256, hidden_dim=256,
     try:
         from tensorflow.keras import Model, Input
         from tensorflow.keras.layers import (
-            Embedding, Dense, Concatenate, SimpleRNN, Dropout, Bidirectional
+            Embedding, Dense, Concatenate, SimpleRNN, Dropout, Bidirectional, Reshape
         )
     except ImportError:
         raise ImportError("TensorFlow diperlukan")
@@ -321,7 +321,7 @@ def build_rnn_decoder_bidirectional(vocab_size, embed_dim=256, hidden_dim=256,
     caption_input = Input(shape=(seq_max_length,), name='caption_tokens')
 
     x_start = Dense(embed_dim, activation='linear', name='cnn_projection')(cnn_input)
-    x_start_expanded = tf.expand_dims(x_start, axis=1)
+    x_start_expanded = Reshape((1, embed_dim), name='cnn_expand')(x_start)
 
     embeddings = Embedding(
         input_dim=vocab_size,
