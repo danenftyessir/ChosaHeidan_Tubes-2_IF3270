@@ -476,6 +476,35 @@ def train_with_variations(data_dir, arch_type='conv2d',
                         print(f"[{config_idx}/{total_configs}] {config_name}")
                         print(f"{'=' * 60}")
 
+                    # Pre-check LocallyConnected2D: estimasi param SEBELUM build
+                    # untuk mencegah OOM yang tidak ter-catch setelah previous OOM
+                    if arch_type == 'locallyconnected':
+                        _H, _W, _C = 150, 150, 3
+                        _kH, _kW = kernel_size
+                        _est = 0
+                        for _i in range(num_layers):
+                            _Ho = (_H - _kH) // 1 + 1
+                            _Wo = (_W - _kW) // 1 + 1
+                            _F = base_filters * (2 ** _i)
+                            _est += _Ho * _Wo * _kH * _kW * _C * _F
+                            _H = _Ho // 2
+                            _W = _Wo // 2
+                            _C = _F
+                        if _est > 150_000_000:
+                            print(f"  [SKIP] Estimasi {_est:,} params > 150M — "
+                                  f"terlalu besar untuk GPU, skip.")
+                            results[config_name] = {
+                                'error': f'skipped_oom_risk: estimasi {_est:,} params',
+                                'config': {
+                                    'type': arch_type,
+                                    'num_conv_layers': num_layers,
+                                    'num_filters': base_filters,
+                                    'kernel_size': kernel_size,
+                                    'pooling_type': pooling,
+                                },
+                            }
+                            continue
+
                     start_time = time.time()
                     config = {}
 
@@ -596,6 +625,10 @@ def train_with_variations(data_dir, arch_type='conv2d',
                     except Exception as e:
                         import gc
                         import tensorflow as _tf_gc
+                        try:
+                            del model
+                        except NameError:
+                            pass
                         _tf_gc.keras.backend.clear_session()
                         gc.collect()
                         print(f"  [ERROR] Build/Training gagal (skip): {type(e).__name__}: {e}")
