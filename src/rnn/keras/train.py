@@ -158,7 +158,7 @@ def train_single_model(cnn_features, train_seq, train_labels,
 
     # Simpan bobot terakhir
     os.makedirs(weights_dir, exist_ok=True)
-    weights_path = os.path.join(weights_dir, f"{model_name}.h5")
+    weights_path = os.path.join(weights_dir, f"{model_name}.weights.h5")
     model.save_weights(weights_path)
     print(f"[Training] Bobot disimpan ke: {weights_path}")
 
@@ -189,7 +189,7 @@ def create_model_checkpoint(weights_dir, model_name):
     try:
         from tensorflow.keras.callbacks import ModelCheckpoint
         os.makedirs(weights_dir, exist_ok=True)
-        path = os.path.join(weights_dir, f"{model_name}_best.h5")
+        path = os.path.join(weights_dir, f"{model_name}_best.weights.h5")
         return ModelCheckpoint(
             path,
             monitor='val_loss',
