@@ -423,6 +423,12 @@ def train_with_variations(data_dir, arch_type='conv2d',
     Returns:
         dict: {config_name: results_dict}
     """
+    # Bebaskan GPU memory dari sesi training sebelumnya
+    import gc
+    import tensorflow as _tf_init
+    _tf_init.keras.backend.clear_session()
+    gc.collect()
+
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
     from .model_keras import build_cnn_factory, count_parameters
 
