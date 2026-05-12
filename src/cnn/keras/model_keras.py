@@ -206,11 +206,65 @@ def build_cnn_locallyconnected(input_shape=INPUT_SHAPE, num_classes=NUM_CLASSES,
     Returns:
         tuple: (model, config_dict)
     """
+    import tensorflow as tf
     from tensorflow.keras import Model
-    from tensorflow.keras.layers import (Input, LocallyConnected2D,
-                                          BatchNormalization, Activation)
-    from tensorflow.keras.layers import (GlobalAveragePooling2D, Dense, Dropout,
+    from tensorflow.keras.layers import (Input, BatchNormalization, Activation,
+                                          GlobalAveragePooling2D, Dense, Dropout,
                                           MaxPooling2D, AveragePooling2D)
+
+    # LocallyConnected2D dihapus di Keras 3.x — implementasi ulang sebagai custom layer
+    class LocallyConnected2D(tf.keras.layers.Layer):
+        """Unshared-weights convolution, setara LocallyConnected2D Keras lama."""
+
+        def __init__(self, filters, kernel_size, strides=(1, 1), padding='valid',
+                     use_bias=True, **kwargs):
+            super().__init__(**kwargs)
+            self.filters = filters
+            self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
+            self.strides = (strides, strides) if isinstance(strides, int) else tuple(strides)
+            self.padding = padding.upper()
+            self._lc_use_bias = use_bias
+
+        def build(self, input_shape):
+            H, W, C_in = int(input_shape[1]), int(input_shape[2]), int(input_shape[3])
+            kH, kW = self.kernel_size
+            sH, sW = self.strides
+            if self.padding == 'VALID':
+                self._H_out = (H - kH) // sH + 1
+                self._W_out = (W - kW) // sW + 1
+            else:
+                import math
+                self._H_out = math.ceil(H / sH)
+                self._W_out = math.ceil(W / sW)
+            n_pos = self._H_out * self._W_out
+            self._lc_kernel = self.add_weight(
+                'kernel', shape=(n_pos, kH * kW * C_in, self.filters),
+                initializer='glorot_uniform')
+            if self._lc_use_bias:
+                self._lc_bias_w = self.add_weight(
+                    'bias', shape=(n_pos, self.filters), initializer='zeros')
+            super().build(input_shape)
+
+        def call(self, x):
+            kH, kW = self.kernel_size
+            sH, sW = self.strides
+            patches = tf.image.extract_patches(
+                x, sizes=[1, kH, kW, 1], strides=[1, sH, sW, 1],
+                rates=[1, 1, 1, 1], padding=self.padding)
+            B = tf.shape(x)[0]
+            n_pos = self._H_out * self._W_out
+            patches = tf.reshape(patches, [B, n_pos, -1])
+            out = tf.einsum('bpi,pio->bpo', patches, self._lc_kernel)
+            if self._lc_use_bias:
+                out = out + self._lc_bias_w
+            return tf.reshape(out, [B, self._H_out, self._W_out, self.filters])
+
+        def get_config(self):
+            cfg = super().get_config()
+            cfg.update(dict(filters=self.filters, kernel_size=self.kernel_size,
+                            strides=self.strides, padding=self.padding,
+                            use_bias=self._lc_use_bias))
+            return cfg
 
     inputs = Input(shape=input_shape, name='input')
     x = inputs
