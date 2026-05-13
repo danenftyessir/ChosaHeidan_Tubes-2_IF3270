@@ -629,19 +629,32 @@ def train_with_variations(data_dir, arch_type='conv2d',
                             print(f"  Training Time: {elapsed:.1f}s")
 
                     except Exception as e:
-                        import gc
-                        import tensorflow as _tf_gc
+                        import gc as _gc_err
+                        import tensorflow as _tf_err
                         try:
                             del model
                         except NameError:
                             pass
-                        _tf_gc.keras.backend.clear_session()
-                        gc.collect()
+                        _tf_err.keras.backend.clear_session()
+                        _gc_err.collect()
                         print(f"  [ERROR] Build/Training gagal (skip): {type(e).__name__}: {e}")
                         results[config_name] = {
                             'error': f"{type(e).__name__}: {e}",
                             'config': config,
                         }
+                        continue
+
+                    # Cleanup GPU memory setelah training berhasil — cegah akumulasi
+                    # antar variasi saat melatih banyak model berurutan
+                    import gc as _gc_ok
+                    import tensorflow as _tf_ok
+                    try:
+                        del model
+                    except NameError:
+                        pass
+                    _tf_ok.keras.backend.clear_session()
+                    _gc_ok.collect()
+
 
     # Save results
     serializable_results = {}
