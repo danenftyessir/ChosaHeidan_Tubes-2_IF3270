@@ -32,8 +32,7 @@ def build_model(vocab_size, embed_dim, hidden_dim, num_layers,
     Returns:
         Keras Model instance.
     """
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-    from model_keras import build_lstm_model
+    from lstm.keras.model_keras import build_lstm_model
 
     model = build_lstm_model(
         vocab_size=vocab_size,

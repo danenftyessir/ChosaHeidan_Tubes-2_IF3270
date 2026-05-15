@@ -78,32 +78,37 @@ def build_lstm_decoder_preinject(vocab_size, embed_dim=256, hidden_dim=512,
     combined = Concatenate(axis=1)([x_start_expanded, embeddings])
     # combined shape: (batch, seq_len + 1, embed_dim)
 
-    # Step 4: LSTM forward
+    # Step 4: LSTM forward — return_sequences=True agar prediksi tiap timestep
+    from tensorflow.keras.layers import TimeDistributed, Lambda
     if num_layers == 1:
         lstm_out = LSTM(
             hidden_dim,
-            return_sequences=False,
+            return_sequences=True,
             dropout=dropout,
-            recurrent_dropout=dropout,
+            recurrent_dropout=0.0,  # 0 agar pakai CuDNN kernel (jauh lebih cepat)
             name='lstm_decoder'
         )(combined)
     else:
         x = combined
         for i in range(num_layers):
-            return_seq = (i < num_layers - 1)
             x = LSTM(
                 hidden_dim,
-                return_sequences=return_seq,
+                return_sequences=True,
                 dropout=dropout,
-                recurrent_dropout=dropout,
+                recurrent_dropout=0.0,  # 0 agar pakai CuDNN kernel
                 name=f'lstm_layer_{i}'
             )(x)
         lstm_out = x
 
     lstm_out = Dropout(dropout)(lstm_out)
 
-    # Step 5: Output Dense → vocab_size
-    output = Dense(vocab_size, activation='softmax', name='output')(lstm_out)
+    # Slice: buang timestep pertama (CNN token)
+    lstm_out = Lambda(lambda x: x[:, 1:, :], name='slice_cnn_step')(lstm_out)
+
+    # Step 5: Output Dense per timestep → (N, seq_max_length, vocab_size)
+    output = TimeDistributed(
+        Dense(vocab_size, activation='softmax'), name='output'
+    )(lstm_out)
 
     model = Model(inputs=[cnn_input, caption_input], outputs=output, name='lstm_preinject')
     return model
