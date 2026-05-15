@@ -84,12 +84,12 @@ def build_rnn_decoder_preinject(vocab_size, embed_dim=256, hidden_dim=512,
     combined = Concatenate(axis=1)([x_start_expanded, embeddings])
     # combined shape: (batch, seq_len + 1, embed_dim)
 
-    # Step 4: RNN forward
-    # Hidden state diinisialisasi dari CNN projection (seperti pre-inject standar)
+    # Step 4: RNN forward — return_sequences=True agar prediksi tiap timestep
+    from tensorflow.keras.layers import TimeDistributed, Lambda
     if num_layers == 1:
         rnn_out = SimpleRNN(
             hidden_dim,
-            return_sequences=False,  # hanya last hidden state
+            return_sequences=True,
             dropout=dropout,
             recurrent_dropout=dropout,
             name='rnn_decoder'
@@ -98,10 +98,9 @@ def build_rnn_decoder_preinject(vocab_size, embed_dim=256, hidden_dim=512,
         # Stacked RNN
         x = combined
         for i in range(num_layers):
-            return_seq = (i < num_layers - 1)
             x = SimpleRNN(
                 hidden_dim,
-                return_sequences=return_seq,
+                return_sequences=True,
                 dropout=dropout,
                 recurrent_dropout=dropout,
                 name=f'rnn_layer_{i}'
@@ -110,8 +109,16 @@ def build_rnn_decoder_preinject(vocab_size, embed_dim=256, hidden_dim=512,
 
     rnn_out = Dropout(dropout)(rnn_out)
 
-    # Step 5: Output Dense → vocab_size
-    output = Dense(vocab_size, activation='softmax', name='output')(rnn_out)
+    # Slice: buang timestep pertama (CNN token), ambil seq_max_length sisanya
+    # combined shape: (N, seq_max_length+1, embed_dim)
+    # rnn_out shape:  (N, seq_max_length+1, hidden_dim)
+    # setelah slice:  (N, seq_max_length, hidden_dim)
+    rnn_out = Lambda(lambda x: x[:, 1:, :], name='slice_cnn_step')(rnn_out)
+
+    # Step 5: Output Dense per timestep → (N, seq_max_length, vocab_size)
+    output = TimeDistributed(
+        Dense(vocab_size, activation='softmax'), name='output'
+    )(rnn_out)
 
     model = Model(inputs=[cnn_input, caption_input], outputs=output, name='rnn_preinject')
     return model
