@@ -11,6 +11,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scratch'))
 from dense import Dense
 from embedding import Embedding
 from simple_rnn_cell import SimpleRNNCell, StackedRNNCell
@@ -88,7 +89,6 @@ class RNNInitInject:
             input_dim=self.feature_dim,
             units=self.hidden_dim,
             activation='linear',
-            name='cnn_proj'
         )
 
         # Output: 2 * hidden_dim (RNN output + CNN proj) → vocab_size
@@ -96,7 +96,6 @@ class RNNInitInject:
             input_dim=2 * self.hidden_dim,
             units=self.vocab_size,
             activation='softmax',
-            name='output'
         )
 
         self._is_built = True
