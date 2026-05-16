@@ -275,7 +275,7 @@ def compare_batch_sizes_lstm(model, cnn_features, gt_captions, idx2word,
         )
         elapsed = time.time() - start_time
 
-        bleu = corpus_bleu_score(gt_captions, pred_captions, n=4)
+        bleu = corpus_bleu_score(gt_captions, pred_captions, max_n=4)
 
         throughput = len(cnn_features) / elapsed
         latency = elapsed / len(cnn_features)

@@ -463,6 +463,95 @@ def compare_preinject_vs_initinject(preinject_model, initinject_model,
     }
 
 
+# ============================================================================
+# Training + BLEU Evaluation untuk Init-Inject
+# ============================================================================
+
+def train_rnn_initinject_keras(cnn_train, seq_train, lbl_train,
+                                cnn_val, seq_val, lbl_val,
+                                vocab_size, cfg, weights_dir,
+                                epochs=30, batch_size=64, lr=0.001):
+    """
+    Latih model Keras RNN Init-Inject (arsitektur training dengan return_sequences=True).
+
+    Menggunakan format data yang sama dengan pre-inject sehingga bisa
+    langsung memakai train_single_model.
+
+    Args:
+        cnn_train, seq_train, lbl_train: data training
+        cnn_val, seq_val, lbl_val: data validasi
+        vocab_size (int): ukuran vocabulary
+        cfg (dict): konfigurasi model (embed_dim, hidden_dim, num_layers, feature_dim, seq_max_length)
+        weights_dir (str): direktori simpan bobot
+        epochs (int): jumlah epoch
+        batch_size (int): ukuran batch
+        lr (float): learning rate
+    Returns:
+        tuple: (keras_model, history, model_name)
+    """
+    from rnn.keras.train import train_single_model
+
+    model_name = f"rnn_l{cfg['num_layers']}_h{cfg['hidden_dim']}_initinject"
+    seq_max_length = cfg.get('seq_max_length', seq_train.shape[1])
+
+    model, history = train_single_model(
+        cnn_features=cnn_train,
+        train_seq=seq_train,
+        train_labels=lbl_train,
+        val_cnn_features=cnn_val,
+        val_seq=seq_val,
+        val_labels=lbl_val,
+        vocab_size=vocab_size,
+        embed_dim=cfg.get('embed_dim', 256),
+        hidden_dim=cfg['hidden_dim'],
+        num_layers=cfg['num_layers'],
+        feature_dim=cfg.get('feature_dim', 2048),
+        seq_max_length=seq_max_length,
+        epochs=epochs,
+        batch_size=batch_size,
+        lr=lr,
+        model_name=model_name,
+        weights_dir=weights_dir,
+        architecture='initinject_train',
+        verbose=1,
+    )
+    return model, history, model_name
+
+
+def evaluate_bleu_rnn_initinject(keras_model, cnn_test, gt_captions, idx2word,
+                                  max_length=34, verbose=True):
+    """
+    Evaluasi BLEU-4 model Keras RNN Init-Inject pada test set.
+
+    Args:
+        keras_model: Keras model hasil train_rnn_initinject_keras
+        cnn_test: (N, feature_dim)
+        gt_captions: list ground-truth caption strings
+        idx2word: dict
+        max_length (int): panjang caption maksimum
+        verbose (bool): cetak progress
+    Returns:
+        tuple: (metrics_dict, pred_captions_list)
+    """
+    from rnn.keras.evaluate import evaluate_model
+    metrics, preds = evaluate_model(
+        keras_model, cnn_test, gt_captions, idx2word,
+        max_length=max_length, verbose=verbose,
+    )
+    return metrics, preds
+
+
+def load_initinject_weights_to_scratch(scratch_model, keras_weights_path):
+    """
+    Load bobot Keras initinject_train ke scratch RNNInitInject.
+
+    Args:
+        scratch_model: RNNInitInject instance (sudah di-build)
+        keras_weights_path (str): path ke file .weights.h5 hasil training
+    """
+    scratch_model.load_weights_from_h5(keras_weights_path)
+
+
 if __name__ == '__main__':
     print("[Test] Membangun RNNInitInject model...")
 

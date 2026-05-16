@@ -69,7 +69,10 @@ class CNNScratch:
 
     def _get_output_shape(self, layer, input_shape):
         """Dapatkan bentuk output dari suatu layer."""
-        N, H, W, C = input_shape
+        if len(input_shape) >= 3:
+            H, W, C = input_shape[-3], input_shape[-2], input_shape[-1]
+        else:
+            H = W = C = 0
         name = layer.__class__.__name__
 
         if name == 'Conv2D':
@@ -102,7 +105,7 @@ class CNNScratch:
             return (H_out, W_out, C)
 
         elif name in ('GlobalAveragePooling2D', 'GlobalMaxPooling2D'):
-            return (1, 1, current_shape[2])  # (H=1, W=1, C=channels)
+            return (1, 1, C)
 
         elif name == 'Flatten':
             return (H * W * C,)
@@ -187,24 +190,43 @@ class CNNScratch:
             raise FileNotFoundError(f"File tidak ditemukan: {h5_path}")
 
         with h5py.File(h5_path, 'r') as f:
-            layer_names = []
-            f.visititems(
-                lambda name, obj: layer_names.append(name)
-                if isinstance(obj, h5py.Dataset) and 'kernel' in name else None
-            )
+            # Support both model.save() ('model_weights' group) and save_weights() formats
+            weights_root = f['model_weights'] if 'model_weights' in f else f
 
             weight_groups = {}
-            for name in layer_names:
+            bn_groups = {}
+            def _collect(name, obj):
+                if not isinstance(obj, h5py.Dataset):
+                    return
                 parts = name.split('/')
+                leaf = parts[-1].split(':')[0]  # strip ':0' suffix
                 layer_key = parts[0]
-                if layer_key not in weight_groups:
-                    weight_groups[layer_key] = {}
-                weight_groups[layer_key][parts[-1]] = np.array(f[name])
+                if leaf in ('kernel', 'bias'):
+                    if layer_key not in weight_groups:
+                        weight_groups[layer_key] = {}
+                    weight_groups[layer_key][leaf] = np.array(obj)
+                elif leaf in ('gamma', 'beta', 'moving_mean', 'moving_variance'):
+                    if layer_key not in bn_groups:
+                        bn_groups[layer_key] = {}
+                    bn_groups[layer_key][leaf] = np.array(obj)
+            weights_root.visititems(_collect)
 
-            sorted_keys = sorted(
-                weight_groups.keys(),
-                key=lambda k: int(k.split('_')[-1])
-            )
+            # Use the layer_names attribute Keras embeds for correct layer order.
+            # Sorting by numeric suffix alone is wrong: 'dense' and 'conv2d' both
+            # get key -1 (no suffix), so stable-sort interleaves them incorrectly.
+            if 'layer_names' in weights_root.attrs:
+                raw = weights_root.attrs['layer_names']
+                ordered = [n.decode('utf-8') if isinstance(n, bytes) else n for n in raw]
+                sorted_keys = [n for n in ordered if n in weight_groups]
+            else:
+                sorted_keys = list(weight_groups.keys())
+
+            print(f"[load_weights] sorted_keys: {sorted_keys}")
+            for k in sorted_keys:
+                wg = weight_groups[k]
+                kshape = wg['kernel'].shape if 'kernel' in wg else None
+                bshape = wg['bias'].shape if 'bias' in wg else None
+                print(f"  {k}: kernel={kshape}, bias={bshape}")
 
             scratch_layer_idx = 0
             for key in sorted_keys:
@@ -219,6 +241,21 @@ class CNNScratch:
                     layer = self.layers[scratch_layer_idx]
                     name = layer.__class__.__name__
                     if name in ('Conv2D', 'LocallyConnected2D'):
+                        # Fuse BatchNorm if a corresponding BN group exists (e.g. block1_conv → block1_bn)
+                        bn_key = key.replace('_conv', '_bn')
+                        if bn_key in bn_groups:
+                            bn = bn_groups[bn_key]
+                            eps = 1e-3  # Keras BatchNorm default epsilon
+                            gamma = bn['gamma'].astype(np.float64)
+                            beta = bn['beta'].astype(np.float64)
+                            moving_mean = bn['moving_mean'].astype(np.float64)
+                            moving_var = bn['moving_variance'].astype(np.float64)
+                            scale = gamma / np.sqrt(moving_var + eps)
+                            # Fuse into conv: W_fused[...,k] = W[...,k] * scale[k]
+                            # bias_fused[k] = beta[k] - scale[k] * moving_mean[k]
+                            kernel = kernel * scale[np.newaxis, np.newaxis, np.newaxis, :]
+                            bias = beta - scale * moving_mean
+
                         # Deteksi LocallyConnected2D: kernel Keras 6D, Conv2D 4D
                         if kernel.ndim == 6:
                             # Keras LocallyConnected2D kernel: (H_out, W_out, kH, kW, C_in, C_out)
@@ -237,6 +274,12 @@ class CNNScratch:
                         scratch_layer_idx += 1
                         break
                     elif name == 'Dense':
+                        if layer.units > 0 and kernel.shape[1] != layer.units:
+                            print(f"[Warning] Skipping weight group '{key}': "
+                                  f"Dense units mismatch (h5={kernel.shape[1]}, "
+                                  f"scratch={layer.units}). "
+                                  f"Tambahkan Dense({kernel.shape[1]}) ke arsitektur scratch.")
+                            break  # skip group, keep scratch_layer_idx on this Dense
                         layer.set_weights(kernel, bias)
                         scratch_layer_idx += 1
                         break

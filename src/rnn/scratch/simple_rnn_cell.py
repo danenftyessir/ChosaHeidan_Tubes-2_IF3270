@@ -168,8 +168,8 @@ class SimpleRNNCell:
         # tanh'(z) = 1 - tanh(z)^2
         z = self.z_caches[-1]
         h = self.h_caches[-1]
-        d_tanh = d_tanh(h)  # shape (batch_size, hidden_dim)
-        dz = dh * d_tanh     # shape (batch_size, hidden_dim)
+        dtanh_val = d_tanh(h)  # shape (batch_size, hidden_dim)
+        dz = dh * dtanh_val     # shape (batch_size, hidden_dim)
 
         # Gradient terhadap weights dan biases
         x = self.x_caches[-1]
@@ -242,8 +242,8 @@ class SimpleRNNCell:
             # Gradient terhadap pre-activation
             h = self.h_caches[t]
             z = self.z_caches[t]
-            d_tanh = d_tanh(h)
-            dz = dh * d_tanh  # (batch_size, hidden_dim)
+            dtanh_val = d_tanh(h)
+            dz = dh * dtanh_val  # (batch_size, hidden_dim)
 
             # Akumulasi gradient terhadap weights
             x = self.x_caches[t]

@@ -278,6 +278,77 @@ def build_lstm_decoder_initinject(vocab_size, embed_dim=256, hidden_dim=512,
 
 
 # ============================================================================
+# Init-Inject Architecture — Training Variant (return_sequences=True)
+# ============================================================================
+
+def build_lstm_decoder_initinject_train(vocab_size, embed_dim=256, hidden_dim=512,
+                                         num_layers=1, feature_dim=2048,
+                                         seq_max_length=40, dropout=0.3):
+    """
+    Decoder LSTM Init-Inject untuk training — output per-timestep.
+
+    Sama dengan init-inject tapi menggunakan return_sequences=True dan
+    mem-broadcast CNN feature ke setiap timestep agar format label cocok
+    dengan pre-inject (N, seq_max_length).
+
+    Output: (batch, seq_max_length, vocab_size)
+    """
+    try:
+        from tensorflow.keras import Model, Input
+        from tensorflow.keras.layers import (
+            Embedding, Dense, Concatenate, LSTM, Dropout,
+            RepeatVector, TimeDistributed
+        )
+    except ImportError:
+        raise ImportError("TensorFlow diperlukan")
+
+    cnn_input = Input(shape=(feature_dim,), name='cnn_features')
+    caption_input = Input(shape=(seq_max_length,), name='caption_tokens')
+
+    embeddings = Embedding(
+        input_dim=vocab_size,
+        output_dim=embed_dim,
+        name='token_embedding'
+    )(caption_input)
+
+    if num_layers == 1:
+        lstm_out = LSTM(
+            hidden_dim,
+            return_sequences=True,
+            dropout=dropout,
+            recurrent_dropout=dropout,
+            name='lstm_decoder'
+        )(embeddings)
+    else:
+        x = embeddings
+        for i in range(num_layers):
+            x = LSTM(
+                hidden_dim,
+                return_sequences=True,
+                dropout=dropout,
+                recurrent_dropout=dropout,
+                name=f'lstm_layer_{i}'
+            )(x)
+        lstm_out = x
+
+    lstm_out = Dropout(dropout)(lstm_out)
+
+    cnn_projected = Dense(hidden_dim, activation='linear', name='cnn_proj')(cnn_input)
+    cnn_broadcast = RepeatVector(seq_max_length, name='cnn_broadcast')(cnn_projected)
+
+    combined = Concatenate(axis=-1, name='combine')([lstm_out, cnn_broadcast])
+    combined = Dropout(dropout)(combined)
+
+    output = TimeDistributed(
+        Dense(vocab_size, activation='softmax'), name='output'
+    )(combined)
+
+    model = Model(inputs=[cnn_input, caption_input], outputs=output,
+                  name='lstm_initinject_train')
+    return model
+
+
+# ============================================================================
 # Bidirectional LSTM (Optional)
 # ============================================================================
 
@@ -380,6 +451,11 @@ def build_lstm_model(vocab_size, embed_dim=256, hidden_dim=512,
         )
     elif architecture == 'initinject':
         return build_lstm_decoder_initinject(
+            vocab_size, embed_dim, hidden_dim, num_layers,
+            feature_dim, seq_max_length, dropout
+        )
+    elif architecture == 'initinject_train':
+        return build_lstm_decoder_initinject_train(
             vocab_size, embed_dim, hidden_dim, num_layers,
             feature_dim, seq_max_length, dropout
         )

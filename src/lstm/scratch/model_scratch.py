@@ -9,6 +9,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
+sys.path.insert(0, os.path.dirname(__file__))
 from dense import Dense
 from embedding import Embedding
 from lstm_cell import LSTMCell, StackedLSTMCell
@@ -181,8 +182,7 @@ class LSTMScratch:
                 x_t = self.embedding.forward(prev_token)[:, 0, :]
 
             # LSTM gates
-            xh = np.concatenate([x_t, h], axis=1)
-            gates = xh @ self.lstm.kernel + h @ self.lstm.recurrent_kernel + self.lstm.bias
+            gates = x_t @ self.lstm.kernel + h @ self.lstm.recurrent_kernel + self.lstm.bias
 
             f = 1 / (1 + np.exp(-gates[:, :self.hidden_dim]))
             i = 1 / (1 + np.exp(-gates[:, self.hidden_dim:2*self.hidden_dim]))
@@ -246,8 +246,7 @@ class LSTMScratch:
                 x_t = self.embedding.forward(prev_tokens)[:, 0, :]
 
             # LSTM step
-            xh = np.concatenate([x_t, h], axis=1)
-            gates = xh @ self.lstm.kernel + h @ self.lstm.recurrent_kernel + self.lstm.bias
+            gates = x_t @ self.lstm.kernel + h @ self.lstm.recurrent_kernel + self.lstm.bias
 
             f = 1 / (1 + np.exp(-gates[:, :self.hidden_dim]))
             i = 1 / (1 + np.exp(-gates[:, self.hidden_dim:2*self.hidden_dim]))
@@ -315,8 +314,7 @@ class LSTMScratch:
         x_start = self.projection.forward(cnn_feature)
         x_t = self.embedding.forward(np.array([[prev_token]]))[:, 0, :]
 
-        xh = np.concatenate([x_t, h_prev], axis=1)
-        gates = xh @ self.lstm.kernel + h_prev @ self.lstm.recurrent_kernel + self.lstm.bias
+        gates = x_t @ self.lstm.kernel + h_prev @ self.lstm.recurrent_kernel + self.lstm.bias
 
         f = 1 / (1 + np.exp(-gates[:, :self.hidden_dim]))
         i = 1 / (1 + np.exp(-gates[:, self.hidden_dim:2*self.hidden_dim]))
@@ -349,6 +347,9 @@ class LSTMScratch:
             raise FileNotFoundError(f"File tidak ditemukan: {h5_path}")
 
         with h5py.File(h5_path, 'r') as f:
+            if 'layers' in f:
+                self._load_weights_keras3(h5_path)
+                return
             layer_weights = {}
             for key in f.keys():
                 if isinstance(f[key], h5py.Group):
@@ -431,6 +432,56 @@ class LSTMScratch:
             bias = w['bias'][:]
             if i < len(self.lstm.layers):
                 self.lstm.layers[i].set_weights(kernel, recurrent_kernel, bias)
+
+    def _load_weights_keras3(self, h5_path):
+        """Load bobot dari file .weights.h5 (Keras 3 format)."""
+        import h5py
+
+        with h5py.File(h5_path, 'r') as f:
+            lg = f['layers']
+
+            # Embedding
+            if 'embedding' in lg and 'vars' in lg['embedding']:
+                emb_w = np.array(lg['embedding']['vars']['0'])
+                self.embedding.set_weights(emb_w)
+
+            # CNN projection Dense (feature_dim → embed_dim)
+            if 'dense' in lg and 'vars' in lg['dense']:
+                proj_k = np.array(lg['dense']['vars']['0'])  # (feature_dim, embed_dim)
+                proj_b = np.array(lg['dense']['vars']['1'])
+                self.projection.set_weights(proj_k, proj_b)
+
+            # LSTM weights
+            if self.num_layers == 1:
+                if 'lstm' in lg and 'cell' in lg['lstm'] and 'vars' in lg['lstm']['cell']:
+                    cv = lg['lstm']['cell']['vars']
+                    self.lstm.set_weights(
+                        np.array(cv['0']),  # kernel (embed_dim, 4*hidden_dim)
+                        np.array(cv['1']),  # recurrent_kernel (hidden_dim, 4*hidden_dim)
+                        np.array(cv['2']),  # bias (4*hidden_dim,)
+                    )
+            else:
+                weights_list = []
+                for i in range(self.num_layers):
+                    key = 'lstm' if i == 0 else f'lstm_{i}'
+                    if key in lg and 'cell' in lg[key] and 'vars' in lg[key]['cell']:
+                        cv = lg[key]['cell']['vars']
+                        weights_list.append((
+                            np.array(cv['0']),
+                            np.array(cv['1']),
+                            np.array(cv['2']),
+                        ))
+                if weights_list:
+                    self.lstm.set_weights(weights_list)
+
+            # Output Dense via TimeDistributed (hidden_dim → vocab_size)
+            if 'time_distributed' in lg and 'layer' in lg['time_distributed']:
+                td_vars = lg['time_distributed']['layer']['vars']
+                out_k = np.array(td_vars['0'])  # (hidden_dim, vocab_size)
+                out_b = np.array(td_vars['1'])
+                self.output_dense.set_weights(out_k, out_b)
+
+        print(f"Bobot berhasil dimuat dari: {h5_path}")
 
     def get_config(self):
         """Return konfigurasi model."""

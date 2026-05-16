@@ -11,6 +11,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scratch'))
 from dense import Dense
 from embedding import Embedding
 from lstm_cell import LSTMCell, StackedLSTMCell
@@ -88,7 +89,6 @@ class LSTMInitInject:
             input_dim=self.feature_dim,
             units=self.hidden_dim,
             activation='linear',
-            name='cnn_proj'
         )
 
         # Output: 2 * hidden_dim (LSTM output + CNN proj) → vocab_size
@@ -96,7 +96,6 @@ class LSTMInitInject:
             input_dim=2 * self.hidden_dim,
             units=self.vocab_size,
             activation='softmax',
-            name='output'
         )
 
         self._is_built = True
@@ -185,8 +184,7 @@ class LSTMInitInject:
             x_t = self.embedding.forward(prev_token)[:, 0, :]
 
             # LSTM step
-            xh = np.concatenate([x_t, h], axis=1)
-            gates = xh @ self.lstm.kernel + h @ self.lstm.recurrent_kernel + self.lstm.bias
+            gates = x_t @ self.lstm.kernel + h @ self.lstm.recurrent_kernel + self.lstm.bias
 
             f = 1 / (1 + np.exp(-gates[:, :self.hidden_dim]))
             i = 1 / (1 + np.exp(-gates[:, self.hidden_dim:2*self.hidden_dim]))
@@ -254,8 +252,7 @@ class LSTMInitInject:
             x_t = self.embedding.forward(prev_tokens)[:, 0, :]
 
             # LSTM step
-            xh = np.concatenate([x_t, h], axis=1)
-            gates = xh @ self.lstm.kernel + h @ self.lstm.recurrent_kernel + self.lstm.bias
+            gates = x_t @ self.lstm.kernel + h @ self.lstm.recurrent_kernel + self.lstm.bias
 
             f = 1 / (1 + np.exp(-gates[:, :self.hidden_dim]))
             i = 1 / (1 + np.exp(-gates[:, self.hidden_dim:2*self.hidden_dim]))
@@ -413,6 +410,44 @@ class LSTMInitInject:
 # Helper Functions
 # ============================================================================
 
+def transfer_preinject_weights_to_initinject(preinject_model, initinject_model):
+    """
+    Transfer compatible weights from a trained pre-inject model to init-inject.
+
+    Compatible (identical shape):
+        embedding, lstm.kernel, lstm.recurrent_kernel, lstm.bias,
+        output_dense.bias, output_dense.weights[:hidden_dim] (LSTM-output half).
+
+    Not transferred (different shapes):
+        cnn_projection (2048→embed_dim vs 2048→hidden_dim),
+        output_dense.weights[hidden_dim:] (CNN-proj half — stays random).
+    """
+    # Embedding
+    initinject_model.embedding.set_weights(
+        preinject_model.embedding.weights.copy()
+    )
+
+    # LSTM weights
+    src_lstm = preinject_model.lstm
+    dst_lstm = initinject_model.lstm
+    dst_lstm.set_weights(
+        src_lstm.kernel.copy(),
+        src_lstm.recurrent_kernel.copy(),
+        src_lstm.bias.copy()
+    )
+
+    # output_dense: copy LSTM-output half of the weight matrix and bias
+    hidden_dim = preinject_model.hidden_dim
+    src_W = preinject_model.output_dense.weights      # (hidden_dim, vocab_size)
+    dst_W = initinject_model.output_dense.weights     # (2*hidden_dim, vocab_size)
+    dst_W[:hidden_dim, :] = src_W.copy()
+    dst_W[hidden_dim:, :] = 0.0
+    initinject_model.output_dense.weights = dst_W
+    initinject_model.output_dense.bias = preinject_model.output_dense.bias.copy()
+
+    print('[InitInject] Bobot embedding + LSTM + output_dense (LSTM-half) berhasil ditransfer.')
+
+
 def build_lstm_initinject_from_config(vocab_size, embed_dim, hidden_dim, num_layers,
                                      feature_dim=2048):
     """
@@ -476,6 +511,92 @@ def compare_lstm_preinject_vs_initinject(preinject_model, initinject_model,
         'preinject': preinject_captions,
         'initinject': initinject_captions,
     }
+
+
+# ============================================================================
+# Training + BLEU Evaluation untuk Init-Inject
+# ============================================================================
+
+def train_lstm_initinject_keras(cnn_train, seq_train, lbl_train,
+                                 cnn_val, seq_val, lbl_val,
+                                 vocab_size, cfg, weights_dir,
+                                 epochs=30, batch_size=64, lr=0.001):
+    """
+    Latih model Keras LSTM Init-Inject (arsitektur training dengan return_sequences=True).
+
+    Args:
+        cnn_train, seq_train, lbl_train: data training
+        cnn_val, seq_val, lbl_val: data validasi
+        vocab_size (int): ukuran vocabulary
+        cfg (dict): konfigurasi model (embed_dim, hidden_dim, num_layers, feature_dim, seq_max_length)
+        weights_dir (str): direktori simpan bobot
+        epochs (int): jumlah epoch
+        batch_size (int): ukuran batch
+        lr (float): learning rate
+    Returns:
+        tuple: (keras_model, history, model_name)
+    """
+    from lstm.keras.train import train_single_model
+
+    model_name = f"lstm_l{cfg['num_layers']}_h{cfg['hidden_dim']}_initinject"
+    seq_max_length = cfg.get('seq_max_length', seq_train.shape[1])
+
+    model, history = train_single_model(
+        cnn_features=cnn_train,
+        train_seq=seq_train,
+        train_labels=lbl_train,
+        val_cnn_features=cnn_val,
+        val_seq=seq_val,
+        val_labels=lbl_val,
+        vocab_size=vocab_size,
+        embed_dim=cfg.get('embed_dim', 256),
+        hidden_dim=cfg['hidden_dim'],
+        num_layers=cfg['num_layers'],
+        feature_dim=cfg.get('feature_dim', 2048),
+        seq_max_length=seq_max_length,
+        epochs=epochs,
+        batch_size=batch_size,
+        lr=lr,
+        model_name=model_name,
+        weights_dir=weights_dir,
+        architecture='initinject_train',
+        verbose=1,
+    )
+    return model, history, model_name
+
+
+def evaluate_bleu_lstm_initinject(keras_model, cnn_test, gt_captions, idx2word,
+                                   max_length=34, verbose=True):
+    """
+    Evaluasi BLEU-4 model Keras LSTM Init-Inject pada test set.
+
+    Args:
+        keras_model: Keras model hasil train_lstm_initinject_keras
+        cnn_test: (N, feature_dim)
+        gt_captions: list ground-truth caption strings
+        idx2word: dict
+        max_length (int): panjang caption maksimum
+        verbose (bool): cetak progress
+    Returns:
+        tuple: (metrics_dict, pred_captions_list)
+    """
+    from lstm.keras.evaluate import evaluate_model
+    metrics, preds = evaluate_model(
+        keras_model, cnn_test, gt_captions, idx2word,
+        max_length=max_length, verbose=verbose,
+    )
+    return metrics, preds
+
+
+def load_initinject_weights_to_scratch(scratch_model, keras_weights_path):
+    """
+    Load bobot Keras initinject_train ke scratch LSTMInitInject.
+
+    Args:
+        scratch_model: LSTMInitInject instance (sudah di-build)
+        keras_weights_path (str): path ke file .weights.h5 hasil training
+    """
+    scratch_model.load_weights_from_h5(keras_weights_path)
 
 
 if __name__ == '__main__':

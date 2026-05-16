@@ -159,8 +159,8 @@ def corpus_bleu_score(references, hypotheses, max_n=4, smooth=False):
         raise ValueError("Jumlah reference dan hypothesis harus sama")
 
     # Aggregate n-gram counts
-    ref_counts = [Counter() for _ in range(max_n)]
-    hyp_counts = [Counter() for _ in range(max_n)]
+    clipped_counts = [0] * max_n   # numerator: sum of clipped hyp n-gram counts
+    total_hyp_counts = [0] * max_n  # denominator: sum of total hyp n-gram counts
     ref_lengths = 0
     hyp_lengths = 0
 
@@ -177,26 +177,19 @@ def corpus_bleu_score(references, hypotheses, max_n=4, smooth=False):
             ref_ngrams = _get_ngrams(ref, i)
             hyp_ngrams = _get_ngrams(hyp, i)
 
-            # Clip dan akumulasi
-            for ngram, count in hyp_ngrams.items():
-                clipped = min(count, ref_ngrams.get(ngram, 0))
-                hyp_counts[i-1][ngram] += clipped
-                ref_counts[i-1][ngram] += ref_ngrams.get(ngram, 0)
+            clipped_counts[i-1] += _clip_ngrams(ref_ngrams, hyp_ngrams)
+            total_hyp_counts[i-1] += sum(hyp_ngrams.values())
 
     # Hitung precisions
     log_precisions = []
     for i in range(max_n):
-        if sum(hyp_counts[i].values()) == 0:
-            precision = 0.0
-        elif sum(ref_counts[i].values()) == 0:
+        if total_hyp_counts[i] == 0:
             precision = 0.0
         else:
-            clipped = sum(hyp_counts[i].values())
-            total = sum(ref_counts[i].values())
-            precision = clipped / total
+            precision = clipped_counts[i] / total_hyp_counts[i]
 
         if smooth and precision == 0:
-            precision = 1.0 / (sum(hyp_counts[i].values()) * 2 ** (max_n - i))
+            precision = 1.0 / (total_hyp_counts[i] * 2 ** (max_n - i))
 
         if precision > 0:
             log_precisions.append(np.log(precision))
@@ -413,7 +406,7 @@ def cider_score(reference, hypothesis, n=4):
 # Batch Evaluation
 # ============================================================================
 
-def evaluate_batch(references, hypotheses, metrics=None):
+def evaluate_batch(references, hypotheses, metrics=None, smooth=True):
     """
     Evaluasi batch caption dengan berbagai metric.
 
@@ -422,6 +415,8 @@ def evaluate_batch(references, hypotheses, metrics=None):
         hypotheses (list): list hypothesis captions (string atau tokenized).
         metrics (list): metric yang akan dihitung.
             Pilihan: 'bleu1', 'bleu2', 'bleu3', 'bleu4', 'meteor', 'cider'.
+        smooth (bool): smoothing untuk BLEU (hindari BLEU-n=0 saat bigram/trigram
+            precision = 0). Default True.
     Returns:
         dict: {metric_name: score}.
     """
@@ -431,16 +426,16 @@ def evaluate_batch(references, hypotheses, metrics=None):
     results = {}
 
     if 'bleu1' in metrics:
-        results['bleu1'] = corpus_bleu_score(references, hypotheses, max_n=1)
+        results['bleu1'] = corpus_bleu_score(references, hypotheses, max_n=1, smooth=smooth)
 
     if 'bleu2' in metrics:
-        results['bleu2'] = corpus_bleu_score(references, hypotheses, max_n=2)
+        results['bleu2'] = corpus_bleu_score(references, hypotheses, max_n=2, smooth=smooth)
 
     if 'bleu3' in metrics:
-        results['bleu3'] = corpus_bleu_score(references, hypotheses, max_n=3)
+        results['bleu3'] = corpus_bleu_score(references, hypotheses, max_n=3, smooth=smooth)
 
     if 'bleu4' in metrics:
-        results['bleu4'] = corpus_bleu_score(references, hypotheses, max_n=4)
+        results['bleu4'] = corpus_bleu_score(references, hypotheses, max_n=4, smooth=smooth)
 
     if 'meteor' in metrics:
         results['meteor'] = corpus_meteor_score(references, hypotheses)

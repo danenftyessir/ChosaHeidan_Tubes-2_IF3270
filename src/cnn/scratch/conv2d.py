@@ -274,9 +274,12 @@ class Conv2D:
             bias: array, bentuk (C_out,).
         """
         self.kernel = kernel.astype(np.float64)
-        self.bias = bias.astype(np.float64)
         self.C_in = kernel.shape[2]
         self.filters = kernel.shape[3]
+        if bias is not None:
+            self.bias = bias.astype(np.float64)
+        else:
+            self.bias = np.zeros(self.filters, dtype=np.float64)
 
     def get_grad_weights(self):
         """Kembalikan gradient bobot (harus dipanggil setelah backward)."""

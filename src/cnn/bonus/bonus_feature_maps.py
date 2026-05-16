@@ -253,7 +253,7 @@ def visualize_filter_weights(conv_layer, filter_idx=None, save_path=None):
     except ImportError:
         raise ImportError("matplotlib diperlukan. Install: pip install matplotlib")
 
-    kernel = conv_layer.kernel
+    kernel = np.array(conv_layer.kernel)
     kH, kW, C_in, C_out = kernel.shape
 
     if filter_idx is None:

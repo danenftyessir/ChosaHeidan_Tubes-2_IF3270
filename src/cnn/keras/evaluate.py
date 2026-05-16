@@ -176,19 +176,55 @@ def create_numpy_generator(image_paths, labels, batch_size=32, shuffle=False,
             yield X_batch, y_batch
 
 
-def load_model_weights(model, weights_path):
+def _build_model_from_filename(weights_path, num_classes=6):
+    """
+    Parse nama file bobot untuk membangun ulang arsitektur model.
+    Format: {arch}_L{layers}_F{filters}_K{kernel}_{pooling}.h5
+    """
+    import re
+    from .model_keras import build_cnn_conv2d, build_cnn_locallyconnected
+    name = os.path.splitext(os.path.basename(weights_path))[0]
+    m = re.match(r'(conv2d|locallyconnected)_L(\d+)_F(\d+)_K(\d+)_(max|average)', name)
+    if not m:
+        raise ValueError(f"Tidak bisa parse nama file bobot: {name!r}. "
+                         "Berikan `model` secara eksplisit.")
+    arch, layers, filters, kernel, pooling = m.groups()
+    layers, filters, kernel = int(layers), int(filters), int(kernel)
+    if arch == 'conv2d':
+        model, _ = build_cnn_conv2d(
+            num_classes=num_classes,
+            num_conv_layers=layers,
+            num_filters=filters,
+            kernel_size=(kernel, kernel),
+            pooling_type=pooling,
+        )
+    else:
+        model, _ = build_cnn_locallyconnected(
+            num_classes=num_classes,
+            num_conv_layers=layers,
+            num_filters=filters,
+            kernel_size=(kernel, kernel),
+            pooling_type=pooling,
+        )
+    return model
+
+
+def load_model_weights(model, weights_path, num_classes=6):
     """
     Load bobot ke model Keras.
 
     Args:
-        model: Keras Model
+        model: Keras Model, atau None untuk membangun dari nama file
         weights_path (str): path ke file .h5
+        num_classes (int): jumlah kelas (dipakai saat model=None)
     Returns:
         model: model dengan bobot yang dimuat
     """
     if not os.path.exists(weights_path):
         raise FileNotFoundError(f"File bobot tidak ditemukan: {weights_path}")
 
+    if model is None:
+        model = _build_model_from_filename(weights_path, num_classes=num_classes)
     model.load_weights(weights_path)
     print(f"Bobot berhasil dimuat dari: {weights_path}")
     return model
@@ -250,6 +286,8 @@ def evaluate_cnn(model, image_paths, labels, batch_size=32,
     results['accuracy'] = accuracy
     results['num_samples'] = len(all_true)
     results['confusion_matrix'] = cm.tolist()
+    results['y_true'] = all_true
+    results['y_pred'] = all_preds
 
     if verbose:
         print(f"\n[Evaluate] Accuracy: {accuracy:.4f}")
