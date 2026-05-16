@@ -104,9 +104,8 @@ def backward_pass_rnn(model, cnn_features, token_seq, targets,
         probs = model.forward(cnn_features, token_seq, training=True)
         loss, dout = cross_entropy_loss(probs, targets[:, -1])  # Prediksi next token
 
-        # Gradient terhadap hidden state terakhir: dL/dh_T = dout @ W_out^T
-        W_out = model.output_dense.weights
-        d_h_final = dout @ W_out.T
+        # Backward through output dense: sets _grad_weights/_grad_bias, returns d_h_final
+        d_h_final = model.output_dense.backward(dout)
 
         if verbose:
             print(f"  Loss: {loss:.4f}")
@@ -133,6 +132,7 @@ def backward_pass_rnn(model, cnn_features, token_seq, targets,
         # Gradient untuk projection layer
         d_x_start = dx_seq[:, 0, :]
         d_cnn = model.projection.backward(d_x_start)
+        proj_grad_W, proj_grad_b = model.projection.get_grad_weights()
 
         # Gradient untuk output dense
         d_W_out, d_b_out = model.output_dense.get_grad_weights()
@@ -149,11 +149,11 @@ def backward_pass_rnn(model, cnn_features, token_seq, targets,
                 'bias': d_b_out,
             },
             'projection': {
-                'weights': model.projection.grad_weights,
-                'bias': model.projection.grad_bias,
+                'weights': proj_grad_W,
+                'bias': proj_grad_b,
             },
             'embedding': {
-                'weights': model.embedding.grad_weights,
+                'weights': model.embedding.get_grad_weights(),
             }
         }
 
@@ -202,6 +202,9 @@ def gradient_checker_rnn(model, cnn_feature_sample, token_sample, label_sample,
     """
     if verbose:
         print("[Gradient Checker] Memeriksa gradient RNN...")
+
+    if label_sample.ndim == 2:
+        label_sample = label_sample[:, -1]
 
     # Forward + Backward analytical
     probs = model.forward(cnn_feature_sample, token_sample, training=True)
@@ -305,8 +308,8 @@ def sgd_update_embedding(layer, lr=0.01):
         layer: Embedding instance
         lr (float): learning rate
     """
-    if hasattr(layer, 'grad_weights'):
-        layer.weights -= lr * layer.grad_weights
+    if hasattr(layer, '_grad_weights'):
+        layer.weights -= lr * layer._grad_weights
 
 
 def adam_update_rnn(layer, t, m, v, beta1=0.9, beta2=0.999, epsilon=1e-8, lr=0.001):

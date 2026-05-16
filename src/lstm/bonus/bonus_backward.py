@@ -92,11 +92,11 @@ def backward_pass_lstm(model, cnn_features, token_seq, targets,
     if output_type == 'loss':
         # Forward pass
         probs = model.forward(cnn_features, token_seq, training=True)
-        loss, dout = cross_entropy_loss_lstm(probs, targets)
+        _targets = targets[:, -1] if targets.ndim == 2 else targets
+        loss, dout = cross_entropy_loss_lstm(probs, _targets)
 
-        # Gradient terhadap hidden state terakhir: dL/dh_T = dout @ W_out^T
-        W_out = model.output_dense.weights
-        d_h_final = dout @ W_out.T
+        # Backward through output dense: sets _grad_weights/_grad_bias, returns d_h_final
+        d_h_final = model.output_dense.backward(dout)
 
         if verbose:
             print(f"  Loss: {loss:.4f}")
@@ -123,6 +123,7 @@ def backward_pass_lstm(model, cnn_features, token_seq, targets,
         # Gradient untuk projection layer
         d_x_start = dx_seq[:, 0, :]
         d_cnn = model.projection.backward(d_x_start)
+        proj_grad_W, proj_grad_b = model.projection.get_grad_weights()
 
         # Gradient untuk output dense
         d_W_out, d_b_out = model.output_dense.get_grad_weights()
@@ -141,11 +142,11 @@ def backward_pass_lstm(model, cnn_features, token_seq, targets,
                 'bias': d_b_out,
             },
             'projection': {
-                'weights': model.projection.grad_weights,
-                'bias': model.projection.grad_bias,
+                'weights': proj_grad_W,
+                'bias': proj_grad_b,
             },
             'embedding': {
-                'weights': model.embedding.grad_weights,
+                'weights': model.embedding.get_grad_weights(),
             }
         }
 
@@ -195,6 +196,9 @@ def gradient_checker_lstm(model, cnn_feature_sample, token_sample, label_sample,
     if verbose:
         print("[Gradient Checker LSTM] Memeriksa gradient LSTM...")
 
+    if label_sample.ndim == 2:
+        label_sample = label_sample[:, -1]
+
     # Forward + Backward analytical
     probs = model.forward(cnn_feature_sample, token_sample, training=True)
     loss, dout = compute_loss_gradient_lstm(probs, label_sample)
@@ -232,7 +236,7 @@ def gradient_checker_lstm(model, cnn_feature_sample, token_sample, label_sample,
     sample_idx = np.random.choice(len(indices), min(max_check, len(indices)), replace=False)
 
     for idx in sample_idx:
-        i, j = idx
+        i, j = indices[idx]
         # +
         kernel_plus = kernel_orig.copy()
         kernel_plus[i, j] += epsilon
@@ -250,8 +254,10 @@ def gradient_checker_lstm(model, cnn_feature_sample, token_sample, label_sample,
     model.lstm.kernel = kernel_orig
 
     # Relative error hanya untuk checked elements
-    checked_grad_analytical = grad_analytical_kernel[sample_idx[:, 0], sample_idx[:, 1]]
-    checked_grad_numerical = grad_numerical_kernel[sample_idx[:, 0], sample_idx[:, 1]]
+    checked_rows = [indices[k][0] for k in sample_idx]
+    checked_cols = [indices[k][1] for k in sample_idx]
+    checked_grad_analytical = grad_analytical_kernel[checked_rows, checked_cols]
+    checked_grad_numerical = grad_numerical_kernel[checked_rows, checked_cols]
 
     numerator = np.abs(checked_grad_analytical - checked_grad_numerical)
     denominator = np.abs(checked_grad_analytical) + np.abs(checked_grad_numerical) + 1e-8
@@ -294,8 +300,8 @@ def sgd_update_dense_lstm(layer, lr=0.01):
 
 def sgd_update_embedding_lstm(layer, lr=0.01):
     """Update bobot Embedding layer dengan SGD."""
-    if hasattr(layer, 'grad_weights'):
-        layer.weights -= lr * layer.grad_weights
+    if hasattr(layer, '_grad_weights'):
+        layer.weights -= lr * layer._grad_weights
 
 
 def adam_update_lstm(layer, t, m, v, beta1=0.9, beta2=0.999,

@@ -260,35 +260,31 @@ class LSTMCell:
             c = self.c_caches[t]
             c_prev = self.c_prev_caches[t]
             h_prev = self.h_prev_caches[t]
-            xh = self.xh_caches[t]
+            x_t = self.x_caches[t]
 
             # Total gradient terhadap hidden state pada timestep t
             dh = dout_seq[:, t, :] + dh_next
 
-            # Gradient terhadap cell state
-            # dh/do = tanh(c) * do/dh
+            # Gradient terhadap output gate
             do = dh * tanh(c)
-
-            # Gradient terhadap output gate sigmoid
             d_o_pre = do * d_sigmoid(o)
 
-            # Gradient terhadap cell state: dc = f*dc_prev + i*g
-            # dh/dc = o * d_tanh(c)
+            # Gradient terhadap cell state
             dc_from_h = dh * o * d_tanh(c)
             dc = dc_from_h + dc_next
 
             # Gradient terhadap gates
             d_f_pre = dc * c_prev * d_sigmoid(f)  # forget gate
             d_i_pre = dc * g * d_sigmoid(i)        # input gate
-            d_g_pre = dc * i * d_tanh(g)             # cell candidate
+            d_g_pre = dc * i * d_tanh(g)           # cell candidate
 
-            # Concatenate gradients untuk gates
+            # Concatenate gradients untuk gates: (batch, 4*hidden_dim)
             d_gates_pre = np.concatenate([d_f_pre, d_i_pre, d_o_pre, d_g_pre], axis=1)
 
-            # Gradient terhadap kernel
-            dkernel_t = xh.T @ d_gates_pre
+            # Gradient terhadap kernel: x_t.T @ d_gates_pre → (input_dim, 4*hidden_dim)
+            dkernel_t = x_t.T @ d_gates_pre
 
-            # Gradient terhadap recurrent_kernel
+            # Gradient terhadap recurrent_kernel: h_prev.T @ d_gates_pre → (hidden_dim, 4*hidden_dim)
             drec_t = h_prev.T @ d_gates_pre
 
             # Gradient terhadap bias
@@ -299,21 +295,16 @@ class LSTMCell:
             drecurrent_kernel_accum += drec_t
             dbias_accum += dbias_t
 
-            # Gradient terhadap xh: dxh = d_gates_pre @ kernel^T
-            dxh = d_gates_pre @ self.kernel.T
+            # Gradient terhadap input x_t: (batch, input_dim)
+            dx_t_grad = d_gates_pre @ self.kernel.T
 
-            # Split: dx dan dh_prev
-            dx_t = dxh[:, :self.input_dim]
-            dh_prev = dxh[:, self.input_dim:]
+            # Gradient terhadap h_prev: (batch, hidden_dim)
+            dh_prev = d_gates_pre @ self.recurrent_kernel.T
 
             # Gradient terhadap c_prev: dari forget gate
             dc_prev = dc * f
 
-            # Gradient terhadap h_prev: dari recurrent connection
-            dh_prev_rec = d_gates_pre @ self.recurrent_kernel.T
-            dh_prev = dh_prev[:, self.input_dim:] + dh_prev_rec
-
-            dx_seq[:, t, :] = dx_t
+            dx_seq[:, t, :] = dx_t_grad
             dh_next = dh_prev
             dc_next = dc_prev
 
