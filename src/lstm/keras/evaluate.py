@@ -22,9 +22,10 @@ from caption_preprocess import END_IDX, START_IDX, sequence_to_caption
 # ============================================================================
 
 def evaluate_model(model, cnn_features, gt_captions, idx2word,
-                   max_length=30, batch_size=64, verbose=True):
+                   max_length=30, batch_size=64, verbose=True,
+                   repetition_penalty=1.5):
     """
-    Evaluasi model LSTM pada dataset dengan greedy decoding.
+    Evaluasi model LSTM pada dataset dengan batched greedy decoding.
 
     Args:
         model: Keras Model instance.
@@ -34,35 +35,64 @@ def evaluate_model(model, cnn_features, gt_captions, idx2word,
         max_length (int): panjang maksimal caption generation.
         batch_size (int): ukuran batch untuk inference.
         verbose (bool): cetak progress.
+        repetition_penalty (float): faktor penalti untuk token berulang.
+            Default 1.5.
     Returns:
         dict: metrics (bleu1-4, meteor).
     """
+    import tensorflow as tf
+
     N = cnn_features.shape[0]
-    pred_captions = []
+    seqs = np.zeros((N, max_length), dtype=np.int32)
+    seqs[:, 0] = START_IDX
+    done = np.zeros(N, dtype=bool)
+    tokens_list = [[] for _ in range(N)]
 
-    num_batches = (N + batch_size - 1) // batch_size
+    for step in range(max_length - 1):
+        active = np.where(~done)[0]
+        if len(active) == 0:
+            break
 
-    for batch_idx in range(num_batches):
-        start = batch_idx * batch_size
-        end = min(start + batch_size, N)
-        batch_cnn = cnn_features[start:end]
+        for b in range(0, len(active), batch_size):
+            idx = active[b: b + batch_size]
+            batch_cnn = tf.constant(cnn_features[idx], dtype=tf.float32)
+            batch_seq = tf.constant(seqs[idx], dtype=tf.int32)
+            probs = model([batch_cnn, batch_seq], training=False).numpy()
+            # probs shape: (batch, max_length, vocab_size)
+            step_probs = probs[:, step, :].copy()
 
-        for i in range(end - start):
-            feat = batch_cnn[i:i+1]
-            pred_seq = greedy_decode_keras(model, feat, max_length)
-            caption = sequence_to_caption(pred_seq, idx2word)
-            pred_captions.append(caption)
+            if repetition_penalty > 1.0:
+                for local_i, sample_i in enumerate(idx):
+                    for prev_tok in set(tokens_list[sample_i]):
+                        step_probs[local_i, prev_tok] /= repetition_penalty
 
-        if verbose and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{num_batches} selesai")
+            next_tokens = np.argmax(step_probs, axis=-1)
+
+            for local_i, sample_i in enumerate(idx):
+                tok = int(next_tokens[local_i])
+                if tok == END_IDX or tok == 0:
+                    done[sample_i] = True
+                else:
+                    tokens_list[sample_i].append(tok)
+                    seqs[sample_i, step + 1] = tok
+
+        if verbose and (step + 1) % 5 == 0:
+            remaining = int((~done).sum())
+            print(f"  Step {step + 1}/{max_length - 1}  ({N - remaining}/{N} selesai)")
+
+        if done.all():
+            break
+
+    pred_captions = [sequence_to_caption(toks, idx2word) for toks in tokens_list]
 
     metrics = evaluate_batch(gt_captions, pred_captions,
-                            metrics=['bleu1', 'bleu2', 'bleu3', 'bleu4', 'meteor'])
+                             metrics=['bleu1', 'bleu2', 'bleu3', 'bleu4', 'meteor'],
+                             smooth=True)
 
     return metrics, pred_captions
 
 
-def greedy_decode_keras(model, cnn_feature, max_length=30):
+def greedy_decode_keras(model, cnn_feature, max_length=30, repetition_penalty=1.5):
     """
     Greedy decoding untuk model Keras LSTM.
 
@@ -70,6 +100,7 @@ def greedy_decode_keras(model, cnn_feature, max_length=30):
         model: Keras Model.
         cnn_feature: (1, feature_dim).
         max_length (int): panjang maksimal.
+        repetition_penalty (float): penalti untuk token berulang. Default 1.5.
     Returns:
         list: sequence of token indices.
     """
@@ -80,9 +111,16 @@ def greedy_decode_keras(model, cnn_feature, max_length=30):
     seq_padded = pad_sequences([seq], maxlen=max_length, padding='post')[0]
 
     for step in range(max_length):
-        probs = model.predict([cnn_feature, seq_padded[np.newaxis, :]], verbose=0)[0]
+        raw = model.predict([cnn_feature, seq_padded[np.newaxis, :]], verbose=0)[0]
+        # raw shape: (seq_max_length, vocab_size) — ambil prediksi di posisi step
+        step_probs = raw[step].copy() if raw.ndim == 2 else raw.copy()
 
-        next_token = int(np.argmax(probs))
+        # Repetition penalty: kurangi prob token yang sudah di-generate
+        if repetition_penalty > 1.0 and tokens:
+            for prev_tok in set(tokens):
+                step_probs[prev_tok] /= repetition_penalty
+
+        next_token = int(np.argmax(step_probs))
 
         if next_token == END_IDX or next_token == 0:
             break

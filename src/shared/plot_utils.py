@@ -319,7 +319,7 @@ def plot_confusion_matrix(y_true, y_pred, classes, save_path=None,
 # ============================================================================
 
 def plot_caption_samples(image_paths, gt_captions, pred_captions,
-                        save_path=None, n=10, figsize=(15, n * 2.5)):
+                        save_path=None, n=10, figsize=None):
     """
     Plot sample gambar dengan caption ground truth dan prediksi.
     Untuk qualitative analysis RNN vs LSTM.
@@ -332,6 +332,8 @@ def plot_caption_samples(image_paths, gt_captions, pred_captions,
         n (int): jumlah sample yang ditampilkan.
         figsize (tuple): ukuran figure.
     """
+    if figsize is None:
+        figsize = (15, n * 2.5)
     try:
         import matplotlib.pyplot as plt
         from PIL import Image
@@ -381,7 +383,7 @@ def plot_caption_samples(image_paths, gt_captions, pred_captions,
 
 def plot_beam_search_comparison(image_paths, gt_captions, greedy_captions,
                                  beam_captions, save_path=None, n=10,
-                                 figsize=(15, n * 2.5)):
+                                 figsize=None):
     """
     Plot perbandingan greedy vs beam search captioning.
 
@@ -394,6 +396,8 @@ def plot_beam_search_comparison(image_paths, gt_captions, greedy_captions,
         n (int): jumlah sample.
         figsize (tuple): ukuran figure.
     """
+    if figsize is None:
+        figsize = (15, n * 2.5)
     try:
         import matplotlib.pyplot as plt
         from PIL import Image

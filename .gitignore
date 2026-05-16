@@ -4,6 +4,17 @@ data/flickr8k/*
 data/features/*
 data/vocab/*
 
+# Data files at root data/ (large binaries)
+data/*.npy
+data/*.json
+data/*.txt
+
+# Weights — exclude files that exceed GitHub's 100MB limit
+# LocallyConnected weights (114MB–3.5GB each)
+weights/cnn/locallyconnected_*.h5
+# Large conv2d variants (>100MB)
+weights/cnn/conv2d_L4_F128_K5_*.h5
+
 # Python
 __pycache__/
 *.py[cod]

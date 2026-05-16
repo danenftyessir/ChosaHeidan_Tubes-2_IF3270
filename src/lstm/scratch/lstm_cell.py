@@ -140,11 +140,9 @@ class LSTMCell:
         if c_prev is None:
             c_prev = np.zeros((batch_size, self.hidden_dim), dtype=np.float64)
 
-        # Concatenate [x_t, h_{t-1}]
-        xh = np.concatenate([x, h_prev], axis=1)  # (batch_size, input_dim + hidden_dim)
-
-        # Gates: [f, i, o, g] = W @ xh + U @ h_prev + b
-        gates = xh @ self.kernel + h_prev @ self.recurrent_kernel + self.bias
+        # Gates: [f, i, o, g] = W_x @ x + W_h @ h_prev + b
+        xh = np.concatenate([x, h_prev], axis=1)  # kept for cache only
+        gates = x @ self.kernel + h_prev @ self.recurrent_kernel + self.bias
 
         # Split dan activate
         f, i, o, g = self._split_gates(gates)

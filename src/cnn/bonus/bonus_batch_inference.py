@@ -52,7 +52,7 @@ def batch_inference(model, X, batch_size=None, verbose=True):
     return np.concatenate(all_probs, axis=0)
 
 
-def predict_class(model, X, batch_size=None):
+def predict_class(model, X, batch_size=None, verbose=False):
     """
     Prediksi kelas (tanpa probabilitas).
 
@@ -60,10 +60,11 @@ def predict_class(model, X, batch_size=None):
         model: instance CNNScratch.
         X: array numpy, bentuk (N, H, W, C).
         batch_size: ukuran batch.
+        verbose: cetak progress.
     Returns:
         predictions: array numpy, bentuk (N,), kelas integer.
     """
-    probs = batch_inference(model, X, batch_size=batch_size, verbose=False)
+    probs = batch_inference(model, X, batch_size=batch_size, verbose=verbose)
     return np.argmax(probs, axis=1)
 
 

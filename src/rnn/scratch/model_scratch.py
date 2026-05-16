@@ -9,6 +9,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
+sys.path.insert(0, os.path.dirname(__file__))
 from dense import Dense
 from embedding import Embedding
 from simple_rnn_cell import SimpleRNNCell, StackedRNNCell
@@ -322,15 +323,16 @@ class RNNScratch:
 
     def load_weights_from_h5(self, h5_path):
         """
-        Load bobot dari file .h5 hasil pelatihan Keras.
+        Load bobot dari file .weights.h5 hasil pelatihan Keras 3.
 
-        Keras SimpleRNN weight format:
-            recurrent_kernel: (hidden_dim, hidden_dim) — ini W_hh
-            kernel: (input_dim, hidden_dim) — ini W_xh
-            bias: (hidden_dim,) — ini b_h
+        Keras 3 format: layers/<name>/vars/<idx>
+            embedding/vars/0              → (vocab_size, embed_dim)
+            dense/vars/0,1                → projection kernel, bias
+            simple_rnn/cell/vars/0,1,2   → kernel (W_xh), recurrent (W_hh), bias
+            time_distributed/layer/vars/0,1 → output dense kernel, bias
 
         Args:
-            h5_path: path ke file .h5.
+            h5_path: path ke file .weights.h5.
         """
         import h5py
 
@@ -338,52 +340,43 @@ class RNNScratch:
             raise FileNotFoundError(f"File tidak ditemukan: {h5_path}")
 
         with h5py.File(h5_path, 'r') as f:
-            layer_weights = {}
-            for key in f.keys():
-                if isinstance(f[key], h5py.Group):
-                    layer_weights[key] = {}
-                    for subkey in f[key].keys():
-                        layer_weights[key][subkey] = np.array(f[key][subkey])
+            layers = f['layers']
 
-        rnn_weights = None
-        dense_weights = None
-        proj_weights = None
+            # Embedding: (vocab_size, embed_dim)
+            if 'embedding' in layers:
+                emb = np.array(layers['embedding']['vars']['0'])
+                if emb.shape == (self.vocab_size, self.embed_dim):
+                    self.embedding.set_weights(emb)
 
-        for key, weights in sorted(layer_weights.items()):
-            if 'kernel' in weights and 'recurrent_kernel' in weights:
-                kernel = weights['kernel'][:]
-                recurrent_kernel = weights['recurrent_kernel'][:]
-                bias = weights['bias'][:]
-                W_xh = kernel.T
-                W_hh = recurrent_kernel.T
-                b_h = bias
-                rnn_weights = (W_xh, W_hh, b_h)
+            # Projection Dense: kernel (feature_dim, embed_dim), bias (embed_dim,)
+            if 'dense' in layers:
+                proj_kernel = np.array(layers['dense']['vars']['0'])
+                proj_bias = np.array(layers['dense']['vars']['1'])
+                self.projection.set_weights(proj_kernel, proj_bias)
 
-            elif 'kernel' in weights and 'bias' in weights:
-                kernel = weights['kernel'][:]
-                bias = weights['bias'][:]
-                if kernel.shape[0] == self.hidden_dim:
-                    W_out = kernel.T
-                    b_out = bias
-                    dense_weights = (W_out, b_out)
-                elif kernel.shape[1] == self.hidden_dim:
-                    W_proj = kernel.T
-                    b_proj = bias
-                    proj_weights = (W_proj, b_proj)
-
-        if rnn_weights is not None:
+            # RNN layers: kernel (input_dim, hidden_dim), recurrent (hidden_dim, hidden_dim)
             if self.num_layers == 1:
-                self.rnn.set_weights(*rnn_weights)
+                rnn_key = 'simple_rnn'
+                if rnn_key in layers:
+                    rnn_kernel = np.array(layers[rnn_key]['cell']['vars']['0'])
+                    rnn_rec = np.array(layers[rnn_key]['cell']['vars']['1'])
+                    rnn_bias = np.array(layers[rnn_key]['cell']['vars']['2'])
+                    self.rnn.set_weights(rnn_kernel, rnn_rec, rnn_bias)
             else:
-                self._load_stacked_rnn_weights(h5_path)
+                for i in range(self.num_layers):
+                    rnn_key = 'simple_rnn' if i == 0 else f'simple_rnn_{i}'
+                    if rnn_key in layers and i < len(self.rnn.layers):
+                        rnn_kernel = np.array(layers[rnn_key]['cell']['vars']['0'])
+                        rnn_rec = np.array(layers[rnn_key]['cell']['vars']['1'])
+                        rnn_bias = np.array(layers[rnn_key]['cell']['vars']['2'])
+                        self.rnn.layers[i].set_weights(rnn_kernel, rnn_rec, rnn_bias)
 
-        if dense_weights is not None:
-            self.output_dense.set_weights(*dense_weights)
+            # Output Dense (TimeDistributed): kernel (hidden_dim, vocab_size)
+            if 'time_distributed' in layers:
+                out_kernel = np.array(layers['time_distributed']['layer']['vars']['0'])
+                out_bias = np.array(layers['time_distributed']['layer']['vars']['1'])
+                self.output_dense.set_weights(out_kernel, out_bias)
 
-        if proj_weights is not None:
-            self.projection.set_weights(*proj_weights)
-
-        self._load_embedding_weights(h5_path)
         print(f"Bobot berhasil dimuat dari: {h5_path}")
 
     def _load_embedding_weights(self, h5_path):

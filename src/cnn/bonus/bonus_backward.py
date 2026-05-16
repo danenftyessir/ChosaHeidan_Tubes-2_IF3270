@@ -119,12 +119,16 @@ def gradient_checker(model, X_sample, label_sample, epsilon=1e-5, verbose=True):
     Returns:
         max_relative_error: error maksimum antara numerical dan analytical gradient.
     """
-    import sys, os
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'shared'))
+    # Extract scalar label (caller may pass array([0]) or plain int)
+    label_int = int(np.asarray(label_sample).flat[0])
 
-    output = model.forward(X_sample)
-    loss_grad = compute_loss_gradient(output, np.array([label_sample]),
-                                       loss_type='cross_entropy')
+    # Forward + analytical gradient.
+    # The model's last Dense layer already applies softmax, so its output IS
+    # the probability vector p.  The combined CE+softmax gradient w.r.t. the
+    # pre-activation of that layer is simply  p - one_hot  (no re-softmax).
+    output = model.forward(X_sample)  # (1, C), already probabilities
+    one_hot_vec = np.eye(model.num_classes)[[label_int]]  # (1, C)
+    loss_grad = output - one_hot_vec
     gradients = backward_pass(model, loss_grad)
 
     max_error = 0.0
@@ -150,11 +154,11 @@ def gradient_checker(model, X_sample, label_sample, epsilon=1e-5, verbose=True):
 
                             layer.kernel = W_plus
                             out_plus = model.forward(X_sample)
-                            loss_plus = -np.sum(out_plus[0] * np.eye(model.num_classes)[label_sample])
+                            loss_plus = -np.log(out_plus[0, label_int] + 1e-12)
 
                             layer.kernel = W_minus
                             out_minus = model.forward(X_sample)
-                            loss_minus = -np.sum(out_minus[0] * np.eye(model.num_classes)[label_sample])
+                            loss_minus = -np.log(out_minus[0, label_int] + 1e-12)
 
                             grad_numerical.flat[flat_idx] = (loss_plus - loss_minus) / (2 * epsilon)
                             flat_idx += 1
@@ -182,11 +186,11 @@ def gradient_checker(model, X_sample, label_sample, epsilon=1e-5, verbose=True):
 
                     layer.weights = W_plus
                     out_plus = model.forward(X_sample)
-                    loss_plus = -np.sum(out_plus[0] * np.eye(model.num_classes)[label_sample])
+                    loss_plus = -np.log(out_plus[0, label_int] + 1e-12)
 
                     layer.weights = W_minus
                     out_minus = model.forward(X_sample)
-                    loss_minus = -np.sum(out_minus[0] * np.eye(model.num_classes)[label_sample])
+                    loss_minus = -np.log(out_minus[0, label_int] + 1e-12)
 
                     grad_numerical[r, c] = (loss_plus - loss_minus) / (2 * epsilon)
 
@@ -300,7 +304,8 @@ def train_step(model, X_batch, y_batch, optimizer='sgd',
     output = model.forward(X_batch)
 
     num_classes = model.num_classes
-    probs = _stable_softmax(output, axis=-1)
+    # Model's last Dense already applies softmax, so output IS probabilities.
+    probs = output
     labels_onehot = np.eye(num_classes)[y_batch.astype(int)]
 
     loss = -np.mean(np.sum(labels_onehot * np.log(probs + 1e-12), axis=1))

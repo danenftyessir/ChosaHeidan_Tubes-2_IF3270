@@ -22,9 +22,10 @@ from caption_preprocess import END_IDX, START_IDX, sequence_to_caption
 # ============================================================================
 
 def evaluate_model(model, cnn_features, gt_captions, idx2word,
-                   max_length=30, batch_size=64, verbose=True):
+                   max_length=30, batch_size=64, verbose=True,
+                   repetition_penalty=1.5):
     """
-    Evaluasi model RNN pada dataset dengan greedy decoding.
+    Evaluasi model RNN pada dataset dengan batched greedy decoding.
 
     Args:
         model: Keras Model instance (pre-inject atau init-inject).
@@ -34,38 +35,71 @@ def evaluate_model(model, cnn_features, gt_captions, idx2word,
         max_length (int): panjang maksimal caption generation.
         batch_size (int): ukuran batch untuk inference.
         verbose (bool): cetak progress.
+        repetition_penalty (float): faktor penalti untuk token yang sudah
+            di-generate. >1.0 mengurangi probabilitas token berulang,
+            mencegah mode collapse "a a a a...". Default 1.5.
     Returns:
         dict: metrics (bleu1-4, meteor, dll).
     """
+    import tensorflow as tf
+
     N = cnn_features.shape[0]
-    pred_captions = []
+    # seqs[i] = token buffer for sample i, initialised with START
+    seqs = np.zeros((N, max_length), dtype=np.int32)
+    seqs[:, 0] = START_IDX
+    done = np.zeros(N, dtype=bool)
+    # tokens_list stores generated (non-special) tokens per sample
+    tokens_list = [[] for _ in range(N)]
 
-    num_batches = (N + batch_size - 1) // batch_size
+    for step in range(max_length - 1):
+        active = np.where(~done)[0]
+        if len(active) == 0:
+            break
 
-    for batch_idx in range(num_batches):
-        start = batch_idx * batch_size
-        end = min(start + batch_size, N)
-        batch_cnn = cnn_features[start:end]
+        # Run model in mini-batches over active samples
+        for b in range(0, len(active), batch_size):
+            idx = active[b: b + batch_size]
+            batch_cnn = tf.constant(cnn_features[idx], dtype=tf.float32)
+            batch_seq = tf.constant(seqs[idx], dtype=tf.int32)
+            # Direct call avoids model.predict overhead
+            probs = model([batch_cnn, batch_seq], training=False).numpy()
+            # probs shape: (batch, max_length, vocab_size) — slice current step
+            step_probs = probs[:, step, :].copy()
 
-        # Greedy decode per sample
-        for i in range(end - start):
-            feat = batch_cnn[i:i+1]  # (1, feature_dim)
-            pred_seq = greedy_decode_keras(model, feat, max_length)
-            caption = sequence_to_caption(pred_seq, idx2word)
-            pred_captions.append(caption)
+            # Repetition penalty: kurangi prob token yang sudah di-generate
+            if repetition_penalty > 1.0:
+                for local_i, sample_i in enumerate(idx):
+                    for prev_tok in set(tokens_list[sample_i]):
+                        step_probs[local_i, prev_tok] /= repetition_penalty
 
-        if verbose and (batch_idx + 1) % 10 == 0:
-            print(f"  Batch {batch_idx + 1}/{num_batches} selesai")
+            next_tokens = np.argmax(step_probs, axis=-1)
+
+            for local_i, sample_i in enumerate(idx):
+                tok = int(next_tokens[local_i])
+                if tok == END_IDX or tok == 0:
+                    done[sample_i] = True
+                else:
+                    tokens_list[sample_i].append(tok)
+                    seqs[sample_i, step + 1] = tok
+
+        if verbose and (step + 1) % 5 == 0:
+            remaining = int((~done).sum())
+            print(f"  Step {step + 1}/{max_length - 1}  ({N - remaining}/{N} selesai)")
+
+        if done.all():
+            break
+
+    pred_captions = [sequence_to_caption(toks, idx2word) for toks in tokens_list]
 
     # Hitung BLEU scores
-    metrics = evaluate_batch(gt_captions, pred_captions, metrics=['bleu1', 'bleu2', 'bleu3', 'bleu4', 'meteor'])
+    metrics = evaluate_batch(gt_captions, pred_captions, metrics=['bleu1', 'bleu2', 'bleu3', 'bleu4', 'meteor'], smooth=True)
 
     return metrics, pred_captions
 
 
 def greedy_decode_keras(model, cnn_feature, max_length=30):
     """
-    Greedy decoding untuk model Keras.
+    Greedy decoding untuk satu sample (dipakai oleh beam search / qualitative).
 
     Args:
         model: Keras Model.
@@ -74,30 +108,26 @@ def greedy_decode_keras(model, cnn_feature, max_length=30):
     Returns:
         list: sequence of token indices.
     """
-    from tensorflow.keras.preprocessing.sequence import pad_sequences
+    import tensorflow as tf
 
-    vocab_size = model.output_shape[-1]
+    seq = np.zeros((1, max_length), dtype=np.int32)
+    seq[0, 0] = START_IDX
     tokens = []
 
-    # Prepare input sequence dengan <start> token
-    seq = [START_IDX]
-    seq_padded = pad_sequences([seq], maxlen=max_length, padding='post')[0]
+    for step in range(max_length - 1):
+        probs = model(
+            [tf.constant(cnn_feature, dtype=tf.float32),
+             tf.constant(seq, dtype=tf.int32)],
+            training=False
+        ).numpy()[0]  # (max_length, vocab_size)
 
-    for step in range(max_length):
-        # Predict
-        probs = model.predict([cnn_feature, seq_padded[np.newaxis, :]], verbose=0)[0]
+        next_token = int(np.argmax(probs[step]))
 
-        # Greedy: ambil token dengan probability tertinggi
-        next_token = int(np.argmax(probs))
-
-        if next_token == END_IDX or next_token == 0:  # 0 = pad
+        if next_token == END_IDX or next_token == 0:
             break
 
         tokens.append(next_token)
-
-        # Update sequence untuk step berikutnya
-        seq.append(next_token)
-        seq_padded = pad_sequences([seq], maxlen=max_length, padding='post')[0]
+        seq[0, step + 1] = next_token
 
     return tokens
 
@@ -133,11 +163,12 @@ def beam_search_decode_keras(model, cnn_feature, idx2word, k=5, max_length=30):
             # Predict
             probs = model.predict([cnn_feature, seq_padded[np.newaxis, :]], verbose=0)[0]
 
-            # Top-k next tokens
-            top_k_idx = np.argsort(probs)[-k:]
+            # Top-k next tokens pada posisi terakhir sequence
+            step_probs = probs[len(seq) - 1]  # (vocab_size,)
+            top_k_idx = np.argsort(step_probs)[-k:]
             for token in top_k_idx:
                 new_seq = seq + [int(token)]
-                new_score = score + np.log(probs[token] + 1e-10)
+                new_score = score + np.log(step_probs[token] + 1e-10)
                 all_candidates.append((new_seq, new_score))
 
         # Select top-k

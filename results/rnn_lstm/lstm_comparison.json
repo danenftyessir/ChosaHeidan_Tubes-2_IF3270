@@ -1,0 +1,26 @@
+{
+  "lstm_l1_h128_preinject": {
+    "best_val_loss": 0.9917470812797546,
+    "epochs_trained": 30
+  },
+  "lstm_l1_h512_preinject": {
+    "best_val_loss": 0.942715048789978,
+    "epochs_trained": 21
+  },
+  "lstm_l2_h128_preinject": {
+    "best_val_loss": 0.9910708665847778,
+    "epochs_trained": 30
+  },
+  "lstm_l2_h512_preinject": {
+    "best_val_loss": 0.9512885808944702,
+    "epochs_trained": 24
+  },
+  "lstm_l3_h128_preinject": {
+    "best_val_loss": 1.0077948570251465,
+    "epochs_trained": 30
+  },
+  "lstm_l3_h512_preinject": {
+    "best_val_loss": 0.9727935194969177,
+    "epochs_trained": 29
+  }
+}

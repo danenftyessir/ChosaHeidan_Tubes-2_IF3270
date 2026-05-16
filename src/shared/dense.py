@@ -58,6 +58,8 @@ class Dense:
 
     def _init_weights(self):
         """Inisialisasi bobot pakai He initialization."""
+        if self.input_dim == 0:
+            return
         std = np.sqrt(2.0 / self.input_dim)
         self.weights = np.random.randn(self.input_dim, self.units).astype(np.float64) * std
         self.bias = np.zeros(self.units, dtype=np.float64)
@@ -136,9 +138,12 @@ class Dense:
     def set_weights(self, weights, bias):
         """Setel bobot dari sumber eksternal (misal: Keras)."""
         self.weights = weights.astype(np.float64)
-        self.bias = bias.astype(np.float64)
         self.input_dim = weights.shape[0]
         self.units = weights.shape[1]
+        if bias is not None:
+            self.bias = bias.astype(np.float64)
+        else:
+            self.bias = np.zeros(self.units, dtype=np.float64)
 
     def get_grad_weights(self):
         """Kembalikan gradient bobot (harus dipanggil setelah backward)."""
